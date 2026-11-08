@@ -64,6 +64,8 @@ and its bounded ingress reserve, result writes that add history return
   and unchanged detail scans retained the same observation and head.
   Replays returned the same receipt. Conflicting, stale and cancelled
   completions and invalid or oversized segments left results unchanged.
+  The transport-level 413 check sends oversized Content-Length headers
+  before uploading a body.
 - A PostgreSQL gate held a completion after event insertion. A same-stream
   writer waited, a different stream committed, and reads saw only the
   previous head. Forcing SQL rollback left the receipt and results

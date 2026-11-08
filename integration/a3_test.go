@@ -3,9 +3,12 @@
 package integration
 
 import (
+	"bufio"
 	"encoding/base64"
 	json "encoding/json/v2"
 	"fmt"
+	"net"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -109,6 +112,32 @@ func a3Problem(t *testing.T, p *testPlane, method, path, who string, in any, wan
 	}
 }
 
+func a3RejectLength(t *testing.T, p *testPlane, path, who string, length int) {
+	t.Helper()
+	conn, err := net.DialTimeout("tcp", p.address, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := conn.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	// Let the server reject Content-Length before sending a body. Closing
+	// a socket with unread body bytes can reset the peer on Linux.
+	_, err = fmt.Fprintf(conn, "POST %s HTTP/1.1\r\nHost: %s\r\nAuthorization: Bearer %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n", path, p.address, p.tokens[who], length)
+	if err != nil {
+		t.Fatal("could not write oversized request header")
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized %s returned %d", path, resp.StatusCode)
+	}
+}
+
 func a3Position(t *testing.T, token string) int64 {
 	t.Helper()
 	data, err := base64.RawURLEncoding.DecodeString(token)
@@ -153,8 +182,8 @@ func testA3Results(t *testing.T, p *testPlane) {
 	a3Problem(t, p, "POST", path, "worker_a", bad, 400, "invalid_request")
 	bad.Result.Segments[1].Data = []byte(fmt.Sprintf("{\"value\":0,\"padding\":%q}", strings.Repeat("x", provider.MaxSegmentData)))
 	a3Problem(t, p, "POST", path, "worker_a", bad, 413, "result_too_large")
-	a3Problem(t, p, "POST", path, "worker_a", map[string]string{"data": strings.Repeat("x", provider.MaxCompletionBody)}, 413, "")
-	a3Problem(t, p, "POST", "/api/v1/jobs", "operator", map[string]string{"data": strings.Repeat("x", 32<<10)}, 413, "")
+	a3RejectLength(t, p, path, "worker_a", provider.MaxCompletionBody+1)
+	a3RejectLength(t, p, "/api/v1/jobs", "operator", execution.MaxBodySize+1)
 	if a3Count(t, p, "SELECT count(*) FROM harvest.observations") != 0 || p.job(claim.JobID).Attempts[0].State != "running" {
 		t.Fatal("validation mutated storage")
 	}

@@ -317,6 +317,20 @@ func TestA2(t *testing.T) {
 	}
 	a.status.Store(0)
 	backup.status.Store(0)
+	// A restored listener can still be in the Worker's local cooldown.
+	// Require a fresh eligible advertisement before exercising recovery.
+	var restoredAt time.Time
+	if err := p.pool.QueryRow(t.Context(), "SELECT clock_timestamp()").Scan(&restoredAt); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, 3*execution.HeartbeatInterval, "restored proxy advertisement", func() bool {
+		var ready bool
+		err := p.pool.QueryRow(t.Context(), `SELECT last_seen > $2 AND EXISTS (
+			SELECT 1 FROM jsonb_array_elements(network_paths) AS path
+			WHERE path->>'profile'='web_edge' AND path->>'state' IN ('healthy','degraded'))
+			FROM harvest.workers WHERE id=$1`, workers["net_worker_a"], restoredAt).Scan(&ready)
+		return err == nil && ready
+	})
 	recovered := submit("net_http", "recovered", "ok", "cn")
 	state(recovered, "succeeded")
 	if got := lab.hit("recovered"); len(got) != 1 || got[0].proxy == "" {
