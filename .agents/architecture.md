@@ -10,6 +10,12 @@ metadata, canonicalization, and typed capability validation. Workers use
 `internal/worker` to pull and finish attempts over authenticated HTTP.
 The integration harness adds a Provider when it re-executes its test binary.
 
+`internal/egress` owns Worker-local transports, route selection, pinned DNS,
+endpoint health and the scoped HTTP client. Each source round trip acquires
+an Attempt-fenced permit before dialing. `internal/execution` derives quota
+buckets from server YAML, the stored Job, compiled capability and authorized
+Worker path. The Worker releases a permit after closing the body.
+
 `internal/server` owns the pool, Scheduler, optional embedded worker and
 Fiber. Startup checks schema compatibility before binding. OnListen enables
 readiness and starts managed loops. Shutdown closes admission, stops
@@ -30,3 +36,5 @@ the checkout. The request cancels the same context used for OS signals.
 - [A1-P proxy and egress](../docs/harvest-a1-proxy-egress-contract.md)
 - [A1 implementation scope](../docs/harvest-v0.1-a1-target-registry-durable-execution.md)
 - [A1 acceptance](../docs/harvest-v0.1-a1-acceptance.md)
+- [A2 implementation scope](../docs/harvest-v0.1-a2-proxy-egress-global-quota.md)
+- [A2 acceptance](../docs/harvest-v0.1-a2-acceptance.md)

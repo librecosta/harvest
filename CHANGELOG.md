@@ -1,5 +1,15 @@
 # Changelog
 
+## V0.1-A2
+
+- Added scoped Worker HTTP execution through direct, HTTP CONNECT, HTTPS
+  CONNECT and SOCKS5 routes, with endpoint health, region matching, verified
+  destination IPs and bounded failover.
+- Added PostgreSQL-backed per-round-trip permits with atomic rate and
+  concurrency accounting, idempotent finish, source cooldown and bounded
+  diagnostics. Exercised the protocol with two isolated Workers and mock
+  upstreams and proxies.
+
 ## V0.1-A1
 
 - Added authenticated Target, Schedule and Job APIs with typed Provider

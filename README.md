@@ -1,9 +1,10 @@
 # Harvest
 
-Harvest is a standalone Go data acquisition engine. V0.1-A1 implements the
-Target registry and durable execution control plane. Production discovery
-reports Web and Steam as `not_implemented`. End-to-end execution is exercised
-by a Provider compiled into the integration test binary.
+Harvest is a standalone Go data acquisition engine. Its durable control plane
+manages Targets, schedules and Worker leases. V0.1-A2 adds Worker-local proxy
+routing and PostgreSQL-backed quotas on every outbound HTTP round trip.
+Production discovery reports Web and Steam as `not_implemented`. The isolated
+integration suite uses a test-only Provider and local origins and proxies.
 
 ## Local development
 
@@ -55,8 +56,8 @@ for the request shapes, schedule rules and test entry points.
 
 A worker uses `harvest worker --config config.worker.yaml` or
 `task dev:worker WORKER_CONFIG=path/to/worker.yaml`. Its YAML contains
-`control_url`, `token`, `concurrency`, `offers`, and optional
-`egress_profiles`. Each offer identifies a compiled executable `capability`,
+`control_url`, `token`, `concurrency`, `offers`, and optional `egress`.
+Each offer identifies a compiled executable `capability`,
 `implementation`, `request_schema` and `output_schema`. The matching server
 principal has role `worker` and declares `namespaces`, `capabilities`,
 `max_slots`, and optional `egress_profiles`. Plain HTTP control URLs require
@@ -64,6 +65,16 @@ a private IP literal. For HTTPS, configure a trusted certificate and private
 ingress. Worker readiness is available through
 `harvest healthcheck --worker --config config.worker.yaml`. An embedded worker
 can use the same YAML shape under `local_worker` with the server's local URL.
+
+For a compiled HTTP capability, configure its namespace and named route under
+server `network` and grant that profile to the Worker principal. The Worker
+advertises only logical paths, regions, health and capacity. See the
+[server example](config.example.yaml) and
+[Worker example](config.worker.example.yaml) for the YAML shapes. Keep proxy
+URLs and credentials in the ignored Worker YAML. Direct fallback requires
+`prefer_proxy` with `allow_direct: true` on both sides and a capability that
+permits direct access. A2 supports fixed-origin HTTP(S) over direct connections,
+HTTP(S) CONNECT and SOCKS5. See the [A2 acceptance record](docs/harvest-v0.1-a2-acceptance.md).
 
 ## Docker
 

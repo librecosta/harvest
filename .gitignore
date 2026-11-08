@@ -40,3 +40,4 @@ go.work.sum
 /config.local.*
 .env.*
 /config.worker.yaml
+/config.worker.yml

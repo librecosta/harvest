@@ -16,3 +16,33 @@ database:
 #     role: "operator"
 #     token: "REPLACE_ME"
 #     namespaces: ["public"]
+#   - name: "regional_worker"
+#     role: "worker"
+#     token: "REPLACE_WITH_A_DISTINCT_GENERATED_TOKEN"
+#     namespaces: ["public"]
+#     capabilities: ["source.http"]
+#     egress_profiles: ["regional"]
+#     max_slots: 2
+
+# Example policy for a compiled HTTP capability. Substitute its actual ID.
+# network:
+#   global_bucket: "cluster"
+#   routes:
+#     - profile: "regional"
+#       mode: "require_proxy"
+#       paths:
+#         - id: "exit_cn"
+#           kind: "https"
+#           region: "cn"
+#           bucket: "egress_cn"
+#   sources:
+#     - capability: "source.http"
+#       namespace: "public"
+#       profile: "regional"
+#       provider_bucket: "source_http"
+#       account_bucket: "source_public"
+#   quotas:
+#     - {id: "cluster", burst: 16, per_minute: 120, concurrency: 4}
+#     - {id: "source_http", burst: 8, per_minute: 60, concurrency: 2}
+#     - {id: "source_public", burst: 4, per_minute: 30, concurrency: 2}
+#     - {id: "egress_cn", burst: 4, per_minute: 30, concurrency: 2}

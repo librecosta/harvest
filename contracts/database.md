@@ -34,5 +34,19 @@ is retained for 30 days and pruned in batches of 128. Expired history also
 releases its submission keys. Schedule phase and Target identity survive
 Job history expiry.
 
+Permit issuance first locks the Job and verifies the Worker, Attempt and
+fencing generation. It locks applicable quota buckets in key order, then
+uses the PostgreSQL clock to check cooldown, refill and reserve capacity.
+Debit and the operation receipt commit together. Finish locks the permit and
+then the same ordered buckets. Replay reads the original receipt without
+another debit. Closing or expiring a permit releases only concurrency.
+Active counts ignore expired permits even before cleanup.
+
+The configured global bucket limits issuance across all Workers. Permit rows
+remain for six minutes after expiry for bounded replay protection, then the
+server removes batches of 256. Bucket usage aggregates reset at UTC midnight.
+Bucket balances and source cooldowns survive that reset. Startup may ensure
+configured bucket rows after schema compatibility succeeds.
+
 Use `task check:containers` for failure injection. It provisions disposable
 credentials and a separate PostgreSQL instance for each test project.
