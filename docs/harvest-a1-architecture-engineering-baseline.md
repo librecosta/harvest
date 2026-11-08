@@ -44,6 +44,13 @@ One repository (`librecosta/harvest`), one Go module/binary, one independently o
 - Incremental delivery must have a **commit-safe** monotonic cursor, not a UUIDv7 or ordinary database sequence used as an assumed commit order. Consider a small serialized per-stream transactional ledger and prove concurrent commits cannot skip events. Consumer resumption after expiration requires explicit reset/snapshot recovery, never silent data loss.
 - Minimal CLI/health diagnostics precede any optional web console. Automated acceptance covers clean start, failed start rollback, SIGTERM drain, DB outage/readiness, two concurrent workers, lost lease/fencing, retry/duplicate result, partial provider success, storage compaction, and consumption recovery.
 
+## A1-P — Proxy Pool & Egress Routing (cross-cutting baseline)
+
+- Proxy-aware egress is a **first-class core capability**, not Provider-specific ad hoc client configuration. Each Worker owns explicit YAML-defined direct/proxy transports and local pool state; Control Plane owns job routing constraints and aggregate quotas.
+- Support HTTP, HTTPS and SOCKS5 proxies where the Provider transport permits; require explicit `direct`, `prefer_proxy` or `require_proxy` route policy. Never silently downgrade `require_proxy` to direct, import environment proxy settings or rotate around upstream policy denials/429 responses.
+- Worker capability matching, per-endpoint health/cooldown, bounded failure fallback, secret isolation, destination/redirect/SSRF protection (including proxy-side DNS resolution) and storage/bandwidth/cost metrics are required in V0.1.
+- See [A1-P Proxy Pool & Egress Routing Contract](./harvest-a1-proxy-egress-contract.md). Its detailed implementation is refined across A1-A (Provider transport contract), A1-B (worker routing/quotas) and A1-C (storage/API/operations).
+
 ## Scope exclusions
 
 No GoFurry catalog, content moderation, cross-region sync logic, human user system, generic ETL/workflow engine, distributed browser farm, third-party code loader, or indefinite raw-content archive within Harvest V0.1.
