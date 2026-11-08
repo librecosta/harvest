@@ -1,22 +1,23 @@
 # Harvest
 
-Harvest is a standalone Go data acquisition engine. V0.1-A0 provides the
-server, PostgreSQL connectivity, operations CLI and verification workflow.
-The design for collection and durable execution lives in the
-[A1 architecture baseline](docs/harvest-a1-architecture-engineering-baseline.md).
+Harvest is a standalone Go data acquisition engine. V0.1-A1 implements the
+Target registry and durable execution control plane. Production discovery
+reports Web and Steam as `not_implemented`. End-to-end execution is exercised
+by a Provider compiled into the integration test binary.
 
 ## Local development
 
 Install Go 1.27.3 and Task 3. Provision a dedicated Harvest database and login
 on PostgreSQL 18. Copy [config.example.yaml](config.example.yaml) to
-`config.yaml`, then set the endpoint, database name, user and password.
-Protect the YAML with your filesystem permissions. TLS verifies the database
-hostname using the system trust store by default. Use `tls_mode: "disable"`
-only for a disposable or otherwise trusted connection.
+`config.yaml`, set the database endpoint and credentials, and protect the file
+with filesystem permissions. The default `verify-full` checks the database
+hostname against the system trust store. Set `tls_mode: "disable"` for a
+disposable connection when it lacks TLS.
 
 ```sh
 task install
 task migrate ACTION=status
+task migrate ACTION=up
 task start
 ```
 
@@ -30,38 +31,63 @@ task check
 task check:containers
 ```
 
-Commands that use application settings require an explicit `--config` path.
-Task supplies `config.yaml` by default and accepts `CONFIG=path/to/file.yaml`.
-Only a single YAML mapping is accepted. Keys are case-sensitive and unknown
-keys, duplicate keys, extra documents and aliases are rejected. Environment
-variables and dotenv files cannot override application settings.
+Each runtime reads a single explicit YAML file. Server tasks use
+`config.yaml` by default and accept `CONFIG=path/to/file.yaml`. Unknown or
+duplicate keys, extra documents and aliases are rejected. YAML secrets stay
+local. Each service principal uses a distinct random URL-safe Bearer token
+and explicitly lists its namespaces. See the commented example for a
+consumer operator. Reader principals can read their scopes, writers can also
+register Targets and submit work, and operators additionally cancel, retry,
+and view operational status.
 
-`GET /livez` checks HTTP responsiveness. `GET /readyz` checks the database
-with a one-second deadline and returns 503 during an outage or drain. The
-`healthcheck` CLI probes readiness directly, with no proxy or redirects.
+`GET /livez` checks HTTP responsiveness. `GET /readyz` checks PostgreSQL and
+the expected migration version and returns 503 during an outage or drain.
+The `healthcheck` CLI probes readiness directly.
+
+## API and workers
+
+The authenticated consumer API is under `/api/v1`. List Targets, Schedules
+and Jobs with `namespace` and optional `after` UUID and `limit` (50 default,
+200 maximum). Job submission and operator retry require an `Idempotency-Key`
+header. The worker protocol is under `/internal/v1`, with separate worker
+principals. See the [A1 acceptance guide](docs/harvest-v0.1-a1-acceptance.md)
+for the request shapes, schedule rules and test entry points.
+
+A worker uses `harvest worker --config config.worker.yaml` or
+`task dev:worker WORKER_CONFIG=path/to/worker.yaml`. Its YAML contains
+`control_url`, `token`, `concurrency`, `offers`, and optional
+`egress_profiles`. Each offer identifies a compiled executable `capability`,
+`implementation`, `request_schema` and `output_schema`. The matching server
+principal has role `worker` and declares `namespaces`, `capabilities`,
+`max_slots`, and optional `egress_profiles`. Plain HTTP control URLs require
+a private IP literal. For HTTPS, configure a trusted certificate and private
+ingress. Worker readiness is available through
+`harvest healthcheck --worker --config config.worker.yaml`. An embedded worker
+can use the same YAML shape under `local_worker` with the server's local URL.
 
 ## Docker
 
 ```sh
 task check:docker
+docker compose run --rm harvest migrate up --config /etc/harvest/config.yaml
 docker compose up -d --wait
 docker compose stop
 ```
 
-Set `http.listen` to `"0.0.0.0:8080"` in the mounted YAML. Use the existing
-PostgreSQL 18 server's reachable address from the container. For PostgreSQL on
-the Docker host, Compose supplies `host.docker.internal`. The host must allow
-connections from the Docker network. Compose publishes HTTP on host loopback.
+Set `http.listen` to `"0.0.0.0:8080"` in the mounted server YAML. The
+existing PostgreSQL 18 server must be reachable from the container.
+For PostgreSQL on the Docker host, Compose supplies `host.docker.internal`.
+Compose publishes server HTTP on host loopback.
 
-Compose uses `./config.yaml` by default. `HARVEST_CONFIG`, `HARVEST_IMAGE`
-and `HARVEST_HTTP_PORT` customize the bind mount, image and published port.
-The mount is read-only and the file must be readable by container UID 65532.
+`HARVEST_CONFIG`, `HARVEST_IMAGE`, and `HARVEST_HTTP_PORT` configure the bind
+mount, image and published port. The optional `worker` profile uses the same
+image and `HARVEST_WORKER_CONFIG` (default `./config.worker.yaml`). Mounted
+configuration is read-only and must be readable by container UID 65532.
 Use an immutable image reference for deployment.
 
 ## Database workflow
 
-`task migrate ACTION=up` explicitly applies the Goose migrations embedded in
-that build. A0 ships an empty migration set. See the
-[database contract](contracts/database.md) for schema ownership and SQL
-generation, and the [A0 acceptance checklist](docs/harvest-v0.1-a0-acceptance.md)
-for what the disposable verification environment exercises.
+Goose applies the SQL embedded in the binary through the explicit migration
+command. The server checks schema compatibility on startup. See the
+[database contract](contracts/database.md) for table ownership, transaction
+boundaries and SQL generation.

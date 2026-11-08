@@ -31,7 +31,7 @@ func TestBindFailureClosesDependenciesOnce(t *testing.T) {
 	}
 	defer ln.Close()
 	db := new(fakeDatabase)
-	if err := serve(t.Context(), ln.Addr().String(), db, slog.New(slog.DiscardHandler)); err == nil {
+	if err := serve(t.Context(), ln.Addr().String(), db, slog.New(slog.DiscardHandler), nil); err == nil {
 		t.Fatal("server accepted an occupied listener address")
 	}
 	if count := db.closed.Load(); count != 1 {
@@ -46,7 +46,7 @@ func TestCanceledStartupClosesDependenciesOnce(t *testing.T) {
 	db := new(fakeDatabase)
 	done := make(chan error, 1)
 	go func() {
-		done <- serve(ctx, "127.0.0.1:0", db, slog.New(slog.DiscardHandler))
+		done <- serve(ctx, "127.0.0.1:0", db, slog.New(slog.DiscardHandler), nil)
 	}()
 	select {
 	case err := <-done:
@@ -76,7 +76,7 @@ func TestGracefulShutdownDrainsBeforeClosingDependencies(t *testing.T) {
 		}
 	}}
 	done := make(chan error, 1)
-	go func() { done <- serve(ctx, "127.0.0.1:0", db, logger) }()
+	go func() { done <- serve(ctx, "127.0.0.1:0", db, logger, nil) }()
 
 	var address string
 	select {

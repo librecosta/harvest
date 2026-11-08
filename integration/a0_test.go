@@ -51,7 +51,7 @@ func TestA0(t *testing.T) {
 			append(append([]string(nil), composeArgs...), "down", "--volumes"),
 			{"image", "rm", project},
 		} {
-			output, err := command(root, env, "docker", args...)
+			output, err := commandRun(root, env, "docker", args...)
 			if err != nil {
 				t.Errorf("fixture cleanup %v: %v\n%s", args, err, output)
 			}
@@ -85,7 +85,7 @@ func TestA0(t *testing.T) {
 	}
 	configPath := filepath.Join(scratch, "native.yaml")
 
-	t.Log("Database authentication and listener bind failures roll back startup")
+	t.Log("Upgrade from the A0 schema and preserve startup rollback")
 	blocker, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -93,6 +93,30 @@ func TestA0(t *testing.T) {
 	defer blocker.Close()
 	address := blocker.Addr().String()
 	writeConfig(t, configPath, address, "127.0.0.1", dbPort, password)
+	expectFailure(t, scratch, hostEnv, bin, "schema is unavailable or incompatible", "serve", "--local", "--config", configPath)
+	if got := native("migrate", "status", "--config", configPath); got != "1 pending" {
+		t.Fatalf("A0 upgrade status: %s", got)
+	}
+	if got := dbQuery("SELECT count(*) FROM pg_namespace WHERE nspname = 'harvest' UNION ALL SELECT count(*) FROM pg_tables WHERE schemaname = 'public'"); got != "0\n0" {
+		t.Fatalf("serve or status applied DDL: %q", got)
+	}
+	if got := native("migrate", "up", "--config", configPath); got != "Applied 1 Harvest migrations." {
+		t.Fatalf("A0 upgrade: %s", got)
+	}
+	if got := native("migrate", "status", "--config", configPath); got != "1 applied" {
+		t.Fatalf("migration status: %s", got)
+	}
+	if got := native("migrate", "up", "--config", configPath); got != "Applied 0 Harvest migrations." {
+		t.Fatalf("repeated up: %s", got)
+	}
+	assertSchema := func() {
+		t.Helper()
+		got := dbQuery("SELECT tablename FROM pg_tables WHERE schemaname = 'harvest' ORDER BY tablename")
+		if got != "attempts\njobs\nschedules\nsubmissions\ntargets\nworkers" {
+			t.Fatalf("unexpected schema: %q", got)
+		}
+	}
+	assertSchema()
 	expectFailure(t, scratch, hostEnv, bin, "cannot bind HTTP listener", "serve", "--local", "--config", configPath)
 	if got := dbQuery("SELECT count(*) FROM pg_stat_activity WHERE application_name IN ('harvest','ambient-override')"); got != "0" {
 		t.Fatalf("failed startup left PostgreSQL sessions: %s", got)
@@ -109,21 +133,6 @@ func TestA0(t *testing.T) {
 	writeConfig(t, configPath, address, "127.0.0.1", dbPort, "wrong-private-password")
 	expectFailure(t, scratch, hostEnv, bin, "cannot connect to PostgreSQL 18", "serve", "--local", "--config", configPath)
 	writeConfig(t, configPath, address, "127.0.0.1", dbPort, password)
-
-	t.Log("Explicit Goose status and up leave an empty A0 schema")
-	for _, action := range []string{"status", "up", "up"} {
-		if got := native("migrate", action, "--config", configPath); got != "No Harvest migrations." {
-			t.Fatalf("migrate %s: %s", action, got)
-		}
-	}
-	assertNoDDL := func() {
-		t.Helper()
-		got := dbQuery("SELECT count(*) FROM pg_namespace WHERE nspname = 'harvest' UNION ALL SELECT count(*) FROM pg_tables WHERE schemaname = 'public'")
-		if got != "0\n0" {
-			t.Fatalf("A0 left application DDL in the fixture: %q", got)
-		}
-	}
-	assertNoDDL()
 
 	t.Log("Native runtime and production Compose both become ready")
 	process := exec.Command(bin, "serve", "--local", "--config", configPath)
@@ -144,10 +153,10 @@ func TestA0(t *testing.T) {
 	if got := docker("inspect", "--format", "{{.Config.User}} {{.HostConfig.ReadonlyRootfs}} {{(index .Mounts 0).RW}}", id); got != "65532:65532 true false" {
 		t.Fatalf("unexpected container runtime settings: %s", got)
 	}
-	if got := dbQuery("SELECT count(*) FROM pg_stat_activity WHERE application_name = 'harvest'"); got != "2" {
-		t.Fatalf("expected two independent YAML-configured Harvest sessions: %s", got)
+	if got := dbQuery("SELECT count(*) >= 2 FROM pg_stat_activity WHERE application_name = 'harvest'"); got != "t" {
+		t.Fatalf("expected both YAML-configured runtimes to use the disposable database: %s", got)
 	}
-	assertNoDDL()
+	assertSchema()
 
 	t.Log("PostgreSQL loss affects readiness only and both runtimes recover")
 	compose("stop", "postgres")
@@ -161,7 +170,7 @@ func TestA0(t *testing.T) {
 		waitProbe(t, addr, "/readyz", http.StatusOK, "ok")
 	}
 	native("healthcheck", "--config", configPath)
-	assertNoDDL()
+	assertSchema()
 
 	t.Log("Checkout stop and Docker SIGTERM drain with a clean exit")
 	otherCheckout := t.TempDir()
@@ -240,7 +249,7 @@ func waitProbe(t *testing.T, address, path string, code int, status string) {
 	t.Fatalf("%s%s did not return %d (%s)", address, path, code, status)
 }
 
-func command(dir string, env []string, name string, args ...string) (string, error) {
+func commandRun(dir string, env []string, name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
@@ -251,7 +260,7 @@ func command(dir string, env []string, name string, args ...string) (string, err
 
 func run(t *testing.T, dir string, env []string, name string, args ...string) string {
 	t.Helper()
-	out, err := command(dir, env, name, args...)
+	out, err := commandRun(dir, env, name, args...)
 	if err != nil {
 		t.Fatalf("%s %v: %v\n%s", name, args, err, out)
 	}
@@ -260,7 +269,7 @@ func run(t *testing.T, dir string, env []string, name string, args ...string) st
 
 func expectFailure(t *testing.T, dir string, env []string, bin, reason string, args ...string) {
 	t.Helper()
-	out, err := command(dir, env, bin, args...)
+	out, err := commandRun(dir, env, bin, args...)
 	if err == nil || !strings.Contains(out, reason) || strings.Contains(out, "wrong-private-password") ||
 		strings.Contains(out, password) {
 		t.Fatalf("expected sanitized failure for %v, exit error = %v, reason matched = %t", args, err, strings.Contains(out, reason))

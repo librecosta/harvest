@@ -10,4 +10,5 @@ The design contracts remain in `docs/` and the runtime database rules are in
 - Use one explicit YAML configuration. Keep credentials out of logs, CLI arguments, fixtures derived from real environments and commits.
 - Keep Fiber route registration and handlers separate. Give the runtime one shutdown owner and test failed startup and clean shutdown.
 - Apply reviewed migrations only with the explicit CLI. Use native Go `uuid.NewV7()` for application entity IDs when introducing entities.
+- Preserve Job-first fencing and the separate worker authentication scope. Register synthetic executors only in the integration test binary.
 - Run `task check` before committing. Run `task check:containers` when changing config, database connectivity, lifecycle or Docker. Use the disposable fixture for destructive verification.

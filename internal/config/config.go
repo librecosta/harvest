@@ -23,8 +23,10 @@ const (
 )
 
 type Config struct {
-	HTTP     HTTP     `mapstructure:"http"`
-	Database Database `mapstructure:"database"`
+	HTTP        HTTP        `mapstructure:"http"`
+	Database    Database    `mapstructure:"database"`
+	Principals  []Principal `mapstructure:"principals"`
+	LocalWorker *Worker     `mapstructure:"local_worker"`
 }
 
 type HTTP struct {
@@ -43,15 +45,30 @@ type Database struct {
 
 func Load(path string) (Config, error) {
 	var cfg Config
+	err := decode(path, &cfg, map[string]any{
+		"http.listen":              "127.0.0.1:8080",
+		"database.port":            5432,
+		"database.tls_mode":        "verify-full",
+		"database.max_connections": 4,
+	})
+	if err != nil {
+		return cfg, err
+	}
+	if err := cfg.validate(); err != nil {
+		return cfg, err
+	}
+	return cfg, validatePrincipals(cfg)
+}
+
+func decode(path string, dst any, defaults map[string]any) error {
 	switch filepath.Ext(path) {
 	case ".yaml", ".yml":
 	default:
-		return cfg, errors.New("--config must name a .yaml or .yml file")
+		return errors.New("--config must name a .yaml or .yml file")
 	}
-
 	data, err := readFile(path)
 	if err != nil {
-		return cfg, err
+		return err
 	}
 	// Reject constructs Viper can normalize or drop before checking unknown keys.
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
@@ -59,25 +76,23 @@ func Load(path string) (Config, error) {
 	if decoder.Decode(&doc) != nil || len(doc.Content) != 1 ||
 		doc.Content[0].Kind != yaml.MappingNode || !plainYAML(doc.Content[0]) ||
 		!errors.Is(decoder.Decode(&extra), io.EOF) {
-		return cfg, errors.New("config must be one YAML mapping with nonempty mappings, unique lowercase keys and string or integer values")
+		return errors.New("config must be one YAML mapping with unique lowercase keys and explicit values")
 	}
-
 	v := viper.New()
 	v.SetConfigType("yaml")
-	v.SetDefault("http.listen", "127.0.0.1:8080")
-	v.SetDefault("database.port", 5432)
-	v.SetDefault("database.tls_mode", "verify-full")
-	v.SetDefault("database.max_connections", 4)
-	if v.ReadConfig(bytes.NewReader(data)) != nil {
-		return cfg, errors.New("invalid YAML configuration")
+	for key, value := range defaults {
+		v.SetDefault(key, value)
 	}
-	if v.UnmarshalExact(&cfg, func(dc *mapstructure.DecoderConfig) {
+	if v.ReadConfig(bytes.NewReader(data)) != nil {
+		return errors.New("invalid YAML configuration")
+	}
+	if v.UnmarshalExact(dst, func(dc *mapstructure.DecoderConfig) {
 		dc.WeaklyTypedInput = false
 		dc.DecodeHook = nil
 	}) != nil {
-		return Config{}, errors.New("configuration contains unknown fields or invalid field types")
+		return errors.New("configuration contains unknown fields or invalid field types")
 	}
-	return cfg, cfg.validate()
+	return nil
 }
 
 func readFile(path string) ([]byte, error) {
@@ -119,8 +134,15 @@ func plainYAML(n *yaml.Node) bool {
 			seen[key.Value] = true
 		}
 		return true
+	case yaml.SequenceNode:
+		for _, child := range n.Content {
+			if !plainYAML(child) {
+				return false
+			}
+		}
+		return true
 	case yaml.ScalarNode:
-		return n.Tag == "!!str" || n.Tag == "!!int"
+		return n.Tag == "!!str" || n.Tag == "!!int" || n.Tag == "!!bool"
 	default:
 		return false
 	}

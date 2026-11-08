@@ -5,6 +5,7 @@ env:
 
 vars:
   CONFIG: '{{.ROOT_DIR}}/config.yaml'
+  WORKER_CONFIG: '{{.ROOT_DIR}}/config.worker.yaml'
   BIN: './bin/harvest{{exeExt}}'
   SQLC: 'github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1'
 
@@ -33,6 +34,14 @@ tasks:
       - task: build
       - '"{{.BIN}}" serve --local --config "$HARVEST_TASK_CONFIG"'
 
+  dev:worker:
+    desc: Build and run a remote worker in the foreground
+    env:
+      HARVEST_TASK_WORKER_CONFIG: '{{.WORKER_CONFIG}}'
+    cmds:
+      - task: build
+      - '"{{.BIN}}" worker --config "$HARVEST_TASK_WORKER_CONFIG"'
+
   stop:
     desc: Request graceful shutdown from the authenticated checkout owner
     cmds:
@@ -57,37 +66,13 @@ tasks:
   sql:generate:
     desc: Generate pgx code from the committed SQL sources
     cmds:
-      - task: sql
-        vars: { SQLC_ACTION: generate }
+      - go run {{.SQLC}} generate
 
   sql:check:
     desc: Check Goose migration syntax and compare generated pgx code
     cmds:
-      - |
-        for migration in db/migrations/*.sql; do
-          if [ -f "$migration" ]; then
-            go run github.com/pressly/goose/v3/cmd/goose@v3.29.0 -env none -dir db/migrations validate
-            exit $?
-          fi
-        done
-      - task: sql
-        vars: { SQLC_ACTION: diff }
-
-  sql:
-    internal: true
-    cmds:
-      - |
-        for query in db/queries/*.sql; do
-          if [ -f "$query" ]; then
-            go run {{.SQLC}} {{.SQLC_ACTION}}
-            exit $?
-          fi
-        done
-        if [ -d internal/database/queries ]; then
-          echo "Generated sqlc code exists without query sources." >&2
-          exit 1
-        fi
-        echo "No sqlc queries in db/queries."
+      - go run -tags "no_mysql no_sqlite3 no_libsql no_clickhouse no_mssql no_ydb no_vertica no_postgres" github.com/pressly/goose/v3/cmd/goose@v3.29.0 -env none -dir db/migrations validate
+      - go run {{.SQLC}} diff
 
   migrate:
     desc: Inspect or explicitly apply embedded migrations against the configured database
@@ -106,6 +91,6 @@ tasks:
       - docker build -t harvest:local .
 
   check:containers:
-    desc: Exercise native and Docker runtimes against an isolated disposable PostgreSQL 18
+    desc: Verify Docker lifecycle and two-Worker execution on disposable PostgreSQL 18
     cmds:
       - go test -tags=integration -count=1 -timeout=8m -v ./integration

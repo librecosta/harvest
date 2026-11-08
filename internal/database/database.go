@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/librecosta/harvest/internal/config"
@@ -45,6 +46,7 @@ func open(ctx context.Context, settings config.Database, readOnly bool) (*pgxpoo
 	}
 	cfg.MaxConns = int32(settings.MaxConns)
 	cfg.AfterConnect = func(_ context.Context, conn *pgx.Conn) error {
+		conn.TypeMap().RegisterType(&pgtype.Type{Name: "timestamptz", OID: pgtype.TimestamptzOID, Codec: &pgtype.TimestamptzCodec{ScanLocation: time.UTC}})
 		version := conn.PgConn().ParameterStatus("server_version")
 		major, _, _ := strings.Cut(version, ".")
 		if major != "18" {

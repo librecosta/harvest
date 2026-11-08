@@ -9,3 +9,10 @@ database:
   password: "REPLACE_ME"
   tls_mode: "verify-full"
   max_connections: 4
+
+# Configure separate generated tokens for service principals.
+# principals:
+#   - name: "harvest_operator"
+#     role: "operator"
+#     token: "REPLACE_ME"
+#     namespaces: ["public"]

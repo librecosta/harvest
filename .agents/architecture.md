@@ -1,29 +1,32 @@
 # Architecture map
 
-`cmd/harvest` owns the Cobra command boundary, config path and signal context.
-`internal/config` decodes strict YAML. `internal/server` owns the pgx pool
-and Fiber app. `internal/routers` registers probe paths and delegates their
-responses to `internal/handlers`. PostgreSQL setup and explicit Goose
-commands live in `internal/database`.
+`cmd/harvest` loads the production Provider registry and invokes the CLI in
+`internal/command`. `internal/config` validates distinct server and worker
+YAML shapes. `internal/routers` owns the Fiber groups and route mapping.
+`internal/handlers` authenticates requests and handles the wire protocol.
+`internal/execution` owns the state machine and transactions through
+generated `internal/database/queries`. `internal/provider` owns compiled
+metadata, canonicalization, and typed capability validation. Workers use
+`internal/worker` to pull and finish attempts over authenticated HTTP.
+The integration harness adds a Provider when it re-executes its test binary.
 
-Database connectivity is established before binding HTTP. Fiber's OnListen
-enables readiness, OnPreShutdown clears it, and OnPostShutdown closes the
-database pool. The same idempotent pool closure covers startup rollback. The
-runtime waits until the listener is registered before requesting shutdown
-if a signal arrives during startup.
+`internal/server` owns the pool, Scheduler, optional embedded worker and
+Fiber. Startup checks schema compatibility before binding. OnListen enables
+readiness and starts managed loops. Shutdown closes admission, stops
+reconciling and permits renew/complete during bounded pre-drain. Fiber
+OnPreShutdown enforces draining and OnPostShutdown closes the pool after
+HTTP. Startup rollback shares the same idempotent cleanup.
 
 `internal/localrun` holds a checkout lock while serving in local mode. Both
 sides authenticate the loopback stop request with fresh challenges bound to
 the checkout. The request cancels the same context used for OS signals.
 
-## Design for the next milestones
+## Contracts
 
-- [A1 baseline](../docs/harvest-a1-architecture-engineering-baseline.md)
-- [A1-A provider, resource and transport](../docs/harvest-a1-a-provider-resource-transport.md)
+- [Engineering baseline](../docs/harvest-a1-architecture-engineering-baseline.md)
+- [A1-A Provider, resource and transport](../docs/harvest-a1-a-provider-resource-transport.md)
 - [A1-B durable scheduling and execution](../docs/harvest-a1-b-distributed-scheduling-execution.md)
 - [A1-C storage, API and operations](../docs/harvest-a1-c-storage-api-operations.md)
 - [A1-P proxy and egress](../docs/harvest-a1-proxy-egress-contract.md)
-
-V0.1-A1 begins Target Registry & Durable Execution. Schema and protocol changes
-belong to that milestone and follow the identity, transaction and fencing
-rules in those contracts.
+- [A1 implementation scope](../docs/harvest-v0.1-a1-target-registry-durable-execution.md)
+- [A1 acceptance](../docs/harvest-v0.1-a1-acceptance.md)

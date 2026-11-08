@@ -14,9 +14,26 @@ services:
       - "host.docker.internal:host-gateway"
     read_only: true
     restart: unless-stopped
-    stop_grace_period: 15s
+    stop_grace_period: 20s
     logging:
       driver: local
       options:
         max-size: "10m"
         max-file: "3"
+
+  worker:
+    profiles: [worker]
+    image: "${HARVEST_IMAGE:-harvest:local}"
+    command: ["worker", "--config", "/etc/harvest/worker.yaml"]
+    volumes:
+      - type: bind
+        source: "${HARVEST_WORKER_CONFIG:-./config.worker.yaml}"
+        target: /etc/harvest/worker.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "/harvest", "healthcheck", "--worker", "--config", "/etc/harvest/worker.yaml"]
+      timeout: 5s
+    read_only: true
+    stop_grace_period: 10s

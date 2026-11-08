@@ -39,3 +39,4 @@ go.work.sum
 /config.yml
 /config.local.*
 .env.*
+/config.worker.yaml
