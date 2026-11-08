@@ -1,0 +1,111 @@
+version: '3'
+
+env:
+  GOTOOLCHAIN: go1.27.3
+
+vars:
+  CONFIG: '{{.ROOT_DIR}}/config.yaml'
+  BIN: './bin/harvest{{exeExt}}'
+  SQLC: 'github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1'
+
+tasks:
+  install:
+    desc: Download Go dependencies and install the Harvest CLI in Go's binary directory
+    cmds:
+      - go mod download
+      - go install ./cmd/harvest
+
+  build:
+    desc: Build the native CLI into bin/
+    cmds:
+      - go build -trimpath -o "{{.BIN}}" ./cmd/harvest
+
+  dev:
+    desc: Build and run the local server in the foreground
+    cmds:
+      - task: start
+
+  start:
+    desc: Run a foreground server owned by this checkout
+    env:
+      HARVEST_TASK_CONFIG: '{{.CONFIG}}'
+    cmds:
+      - task: build
+      - '"{{.BIN}}" serve --local --config "$HARVEST_TASK_CONFIG"'
+
+  stop:
+    desc: Request graceful shutdown from the authenticated checkout owner
+    cmds:
+      - 'go run ./cmd/harvest stop'
+
+  test:
+    cmds:
+      - go test ./...
+
+  check:
+    desc: Check formatting, dependencies, tests, build and SQL generation
+    cmds:
+      - |
+        files="$(gofmt -l .)" || exit 1
+        if [ -n "$files" ]; then printf '%s\n' "$files"; exit 1; fi
+      - go mod tidy -diff
+      - go vet ./...
+      - task: test
+      - task: build
+      - task: sql:check
+
+  sql:generate:
+    desc: Generate pgx code from the committed SQL sources
+    cmds:
+      - task: sql
+        vars: { SQLC_ACTION: generate }
+
+  sql:check:
+    desc: Check Goose migration syntax and compare generated pgx code
+    cmds:
+      - |
+        for migration in db/migrations/*.sql; do
+          if [ -f "$migration" ]; then
+            go run github.com/pressly/goose/v3/cmd/goose@v3.29.0 -env none -dir db/migrations validate
+            exit $?
+          fi
+        done
+      - task: sql
+        vars: { SQLC_ACTION: diff }
+
+  sql:
+    internal: true
+    cmds:
+      - |
+        for query in db/queries/*.sql; do
+          if [ -f "$query" ]; then
+            go run {{.SQLC}} {{.SQLC_ACTION}}
+            exit $?
+          fi
+        done
+        if [ -d internal/database/queries ]; then
+          echo "Generated sqlc code exists without query sources." >&2
+          exit 1
+        fi
+        echo "No sqlc queries in db/queries."
+
+  migrate:
+    desc: Inspect or explicitly apply embedded migrations against the configured database
+    vars:
+      ACTION: '{{default "status" .ACTION}}'
+    env:
+      HARVEST_TASK_CONFIG: '{{.CONFIG}}'
+      HARVEST_TASK_ACTION: '{{.ACTION}}'
+    cmds:
+      - go run ./cmd/harvest migrate "$HARVEST_TASK_ACTION" --config "$HARVEST_TASK_CONFIG"
+
+  check:docker:
+    desc: Validate deployment Compose and build the local Linux image
+    cmds:
+      - docker compose config --quiet
+      - docker build -t harvest:local .
+
+  check:containers:
+    desc: Exercise native and Docker runtimes against an isolated disposable PostgreSQL 18
+    cmds:
+      - go test -tags=integration -count=1 -timeout=8m -v ./integration

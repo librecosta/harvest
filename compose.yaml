@@ -1,0 +1,22 @@
+services:
+  harvest:
+    image: "${HARVEST_IMAGE:-harvest:local}"
+    ports:
+      - "127.0.0.1:${HARVEST_HTTP_PORT:-8080}:8080"
+    volumes:
+      - type: bind
+        source: "${HARVEST_CONFIG:-./config.yaml}"
+        target: /etc/harvest/config.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    read_only: true
+    restart: unless-stopped
+    stop_grace_period: 15s
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"

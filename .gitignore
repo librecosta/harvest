@@ -31,3 +31,11 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Harvest local runtime and credentials
+/bin/
+/.harvest/
+/config.yaml
+/config.yml
+/config.local.*
+.env.*

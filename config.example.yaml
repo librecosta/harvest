@@ -1,0 +1,11 @@
+http:
+  listen: "127.0.0.1:8080"
+
+database:
+  host: "127.0.0.1"
+  port: 5432
+  name: "harvest"
+  user: "harvest"
+  password: "REPLACE_ME"
+  tls_mode: "verify-full"
+  max_connections: 4
