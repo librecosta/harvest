@@ -15,6 +15,8 @@ import (
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/librecosta/harvest/internal/egress"
 )
 
 const (
@@ -23,10 +25,11 @@ const (
 )
 
 type Config struct {
-	HTTP        HTTP        `mapstructure:"http"`
-	Database    Database    `mapstructure:"database"`
-	Principals  []Principal `mapstructure:"principals"`
-	LocalWorker *Worker     `mapstructure:"local_worker"`
+	HTTP        HTTP                 `mapstructure:"http"`
+	Database    Database             `mapstructure:"database"`
+	Principals  []Principal          `mapstructure:"principals"`
+	LocalWorker *Worker              `mapstructure:"local_worker"`
+	Network     egress.NetworkConfig `mapstructure:"network"`
 }
 
 type HTTP struct {
@@ -55,6 +58,9 @@ func Load(path string) (Config, error) {
 		return cfg, err
 	}
 	if err := cfg.validate(); err != nil {
+		return cfg, err
+	}
+	if err := validateNetwork(cfg); err != nil {
 		return cfg, err
 	}
 	return cfg, validatePrincipals(cfg)

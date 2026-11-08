@@ -111,7 +111,7 @@ func (a *API) respond(c fiber.Ctx, status int, value any, err error) error {
 	case errors.Is(err, execution.ErrNotFound):
 		return problem(c, 404, err.Error(), info.id)
 	case errors.Is(err, execution.ErrUnsupported), errors.Is(err, execution.ErrFence),
-		errors.Is(err, execution.ErrCancelled), errors.Is(err, execution.ErrConflict), errors.Is(err, execution.ErrTerminal):
+		errors.Is(err, execution.ErrCancelled), errors.Is(err, execution.ErrConflict), errors.Is(err, execution.ErrTerminal), errors.Is(err, execution.ErrQuotaBudget), errors.Is(err, execution.ErrEgressUnavailable):
 		return problem(c, 409, err.Error(), info.id)
 	case errors.As(err, &pgErr) && pgErr.Code == "23505":
 		return problem(c, 409, "conflict", info.id)

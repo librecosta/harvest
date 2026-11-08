@@ -1,6 +1,6 @@
 -- name: InsertWorker :exec
-INSERT INTO harvest.workers (id, principal, offers, egress_profiles, capacity)
-VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING;
+INSERT INTO harvest.workers (id, principal, offers, egress_profiles, capacity, network_paths)
+VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (id) DO NOTHING;
 
 -- name: Worker :one
 SELECT * FROM harvest.workers WHERE id = $1 AND principal = $2;
@@ -9,7 +9,8 @@ SELECT * FROM harvest.workers WHERE id = $1 AND principal = $2;
 SELECT * FROM harvest.workers WHERE id = $1 AND principal = $2 FOR UPDATE;
 
 -- name: HeartbeatWorker :one
-UPDATE harvest.workers SET last_seen = clock_timestamp(), draining = draining OR sqlc.arg(draining)::boolean
+UPDATE harvest.workers SET last_seen = clock_timestamp(), draining = draining OR sqlc.arg(draining)::boolean,
+    network_paths = coalesce(sqlc.narg(paths)::jsonb, network_paths)
 WHERE id = $1 AND principal = $2 RETURNING *;
 
 -- name: WorkerLeaseCount :one
@@ -38,7 +39,7 @@ UPDATE harvest.attempts SET ended_at = $2, state = $3, error_code = $4, result_h
 WHERE id = $1;
 
 -- name: WorkerSummary :many
-SELECT id, capacity, last_seen, draining FROM harvest.workers
+SELECT id, capacity, last_seen, draining, network_paths FROM harvest.workers
 WHERE principal = ANY(sqlc.arg(principals)::text[]) AND last_seen >= statement_timestamp() - interval '30 seconds'
 ORDER BY last_seen DESC, id LIMIT 100;
 
@@ -49,6 +50,12 @@ DELETE FROM harvest.workers WHERE id IN (
       AND NOT EXISTS (SELECT 1 FROM harvest.attempts a WHERE a.worker_id = w.id)
     ORDER BY w.last_seen, w.id LIMIT 128 FOR UPDATE SKIP LOCKED
 );
+
+-- name: NetworkWorkers :many
+SELECT * FROM harvest.workers WHERE principal = ANY(sqlc.arg(principals)::text[]) AND NOT draining
+  AND last_seen > statement_timestamp() - interval '30 seconds'
+  AND sqlc.arg(execution_key)::text = ANY(offers)
+ORDER BY last_seen DESC LIMIT 100;
 
 -- name: EligibleWorker :one
 SELECT EXISTS (

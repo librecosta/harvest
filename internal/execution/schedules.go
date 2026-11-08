@@ -279,9 +279,14 @@ func (e *Engine) Reconcile(ctx context.Context) error {
 	return nil
 }
 
+func (e *Engine) PrunePermits(ctx context.Context) error { return e.queries.PruneQuotaPermits(ctx) }
+
 func (e *Engine) Prune(ctx context.Context) error {
 	if err := e.queries.PruneJobs(ctx); err != nil {
 		return err
 	}
-	return e.queries.PruneWorkers(ctx)
+	if err := e.queries.PruneWorkers(ctx); err != nil {
+		return err
+	}
+	return e.queries.PruneQuotaBuckets(ctx, e.quotaKeys())
 }

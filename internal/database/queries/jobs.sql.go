@@ -393,8 +393,9 @@ SELECT j.id, j.target_id, j.namespace, j.capability, j.request_schema, j.executi
 JOIN harvest.targets t ON t.id = j.target_id
 WHERE j.state IN ('queued', 'retry_wait') AND j.available_at <= statement_timestamp()
   AND j.deadline_at > statement_timestamp() AND j.attempt_count < j.max_attempts
-  AND j.execution_key = ANY($1::text[])
-  AND j.namespace = ANY($2::text[])
+  AND (j.execution_key = ANY($1::text[]) OR
+    j.execution_key || '|' || j.namespace || '|' || coalesce(j.scope->>'egress_region','') = ANY($2::text[]))
+  AND j.namespace = ANY($3::text[])
   AND t.state = 'active'
 ORDER BY CASE WHEN j.available_at <= statement_timestamp() - interval '30 seconds' THEN 2 ELSE j.priority END DESC,
     j.available_at, j.id
@@ -402,12 +403,13 @@ LIMIT 1 FOR UPDATE OF j SKIP LOCKED
 `
 
 type LockClaimableJobParams struct {
-	Offers     []string `json:"offers"`
-	Namespaces []string `json:"namespaces"`
+	Offers        []string `json:"offers"`
+	NetworkOffers []string `json:"network_offers"`
+	Namespaces    []string `json:"namespaces"`
 }
 
 func (q *Queries) LockClaimableJob(ctx context.Context, arg LockClaimableJobParams) (HarvestJob, error) {
-	row := q.db.QueryRow(ctx, lockClaimableJob, arg.Offers, arg.Namespaces)
+	row := q.db.QueryRow(ctx, lockClaimableJob, arg.Offers, arg.NetworkOffers, arg.Namespaces)
 	var i HarvestJob
 	err := row.Scan(
 		&i.ID,

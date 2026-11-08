@@ -41,7 +41,8 @@ SELECT j.* FROM harvest.jobs j
 JOIN harvest.targets t ON t.id = j.target_id
 WHERE j.state IN ('queued', 'retry_wait') AND j.available_at <= statement_timestamp()
   AND j.deadline_at > statement_timestamp() AND j.attempt_count < j.max_attempts
-  AND j.execution_key = ANY(sqlc.arg(offers)::text[])
+  AND (j.execution_key = ANY(sqlc.arg(offers)::text[]) OR
+    j.execution_key || '|' || j.namespace || '|' || coalesce(j.scope->>'egress_region','') = ANY(sqlc.arg(network_offers)::text[]))
   AND j.namespace = ANY(sqlc.arg(namespaces)::text[])
   AND t.state = 'active'
 ORDER BY CASE WHEN j.available_at <= statement_timestamp() - interval '30 seconds' THEN 2 ELSE j.priority END DESC,

@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 	"uuid"
+
+	"github.com/librecosta/harvest/internal/egress"
 )
 
 const MaxValueSize = 12 << 10
@@ -81,7 +83,8 @@ type Capability struct {
 	Partial         bool
 	NormalizeParams func(jsontext.Value) (jsontext.Value, error)
 	NormalizeOutput func(jsontext.Value) (jsontext.Value, error)
-	Execute         func(context.Context, Task) Result
+	Network         *egress.Source
+	Execute         func(context.Context, Task, egress.Client) Result
 }
 
 type Manifest struct {
@@ -126,7 +129,8 @@ func New(manifests ...Manifest) (*Registry, error) {
 			if !ok || name != m.Name || !Identifier(operation) || !resources[c.Resource] ||
 				c.RequestSchema < 1 || c.OutputSchema < 1 || !Identifier(c.Implementation) ||
 				c.MinInterval < time.Second || c.Timeout < time.Second || c.Timeout > 2*time.Minute ||
-				c.NormalizeParams == nil || c.NormalizeOutput == nil || r.caps[c.Capability].Capability != "" {
+				c.NormalizeParams == nil || c.NormalizeOutput == nil || r.caps[c.Capability].Capability != "" ||
+				(c.Network != nil && !c.Network.Valid()) {
 				return nil, errors.New("invalid capability registration")
 			}
 			r.caps[c.Capability] = c

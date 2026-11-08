@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/librecosta/harvest/internal/egress"
 	"github.com/librecosta/harvest/internal/provider"
 )
 
@@ -26,6 +27,7 @@ type Worker struct {
 	Offers         []provider.Offer `mapstructure:"offers"`
 	EgressProfiles []string         `mapstructure:"egress_profiles"`
 	Concurrency    int32            `mapstructure:"concurrency"`
+	Egress         egress.Config    `mapstructure:"egress"`
 }
 
 func LoadWorker(path string) (Worker, error) {
@@ -57,7 +59,7 @@ func validateWorker(w Worker) error {
 		}
 		seen[offer.Capability] = true
 	}
-	return nil
+	return validateEgress(w.Egress)
 }
 
 func privateHost(host string) bool {

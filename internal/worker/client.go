@@ -82,8 +82,9 @@ func (c client) request(ctx context.Context, method, path string, in, out any) (
 		return false, errors.New("control plane unavailable")
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, execution.MaxBodySize+1))
-	if err != nil || len(data) > execution.MaxBodySize {
+	const maxResponse = 24 << 10
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponse+1))
+	if err != nil || len(data) > maxResponse {
 		return false, errors.New("invalid control plane response")
 	}
 	switch resp.StatusCode {

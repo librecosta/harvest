@@ -57,6 +57,26 @@ func (a *API) Complete() fiber.Handler {
 	})
 }
 
+func (a *API) Permit() fiber.Handler {
+	return action(a, 200, func(c fiber.Ctx, p config.Principal, in execution.PermitRequest) (any, error) {
+		id, err := pathID(c)
+		if err != nil {
+			return nil, err
+		}
+		return a.engine.Permit(c.Context(), p, id, in)
+	})
+}
+
+func (a *API) FinishPermit() fiber.Handler {
+	return action(a, 204, func(c fiber.Ctx, p config.Principal, in execution.PermitFinish) (any, error) {
+		id, err := pathID(c)
+		if err != nil {
+			return nil, err
+		}
+		return nil, a.engine.FinishPermit(c.Context(), p, id, in)
+	})
+}
+
 func (a *API) WorkerReady(ready func(context.Context) bool) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		err := a.engine.WorkerReadiness(request(c).principal)

@@ -27,6 +27,7 @@ import (
 	"github.com/librecosta/harvest/internal/command"
 	"github.com/librecosta/harvest/internal/config"
 	"github.com/librecosta/harvest/internal/database"
+	"github.com/librecosta/harvest/internal/egress"
 	"github.com/librecosta/harvest/internal/execution"
 	"github.com/librecosta/harvest/internal/provider"
 )
@@ -69,7 +70,7 @@ func fixtureRegistry() *provider.Registry {
 				return json.Marshal(p)
 			},
 			NormalizeOutput: provider.Normalize[fixtureOutput],
-			Execute: func(ctx context.Context, task provider.Task) provider.Result {
+			Execute: func(ctx context.Context, task provider.Task, _ egress.Client) provider.Result {
 				p, err := provider.Object[fixtureParams](task.Params)
 				if err != nil {
 					return provider.Result{State: "failed", Code: "invalid_payload"}
@@ -95,6 +96,9 @@ func fixtureRegistry() *provider.Registry {
 			},
 		}},
 	}
+	if origins := os.Getenv("HARVEST_TEST_ORIGINS"); origins != "" {
+		manifest.Capabilities = append(manifest.Capabilities, fixtureNetwork(strings.Split(origins, ",")))
+	}
 	r, err := provider.New(append(provider.Builtins(), manifest)...)
 	if err != nil {
 		panic(err)
@@ -105,6 +109,9 @@ func fixtureRegistry() *provider.Registry {
 func TestMain(m *testing.M) {
 	if len(os.Args) > 2 && os.Args[1] == "fixture" {
 		logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+		if os.Getenv("HARVEST_TEST_ORIGINS") != "" {
+			go sampleProcessHeap()
+		}
 		if err := command.Run(os.Args[2:], fixtureRegistry(), logger); err != nil {
 			logger.Error("command failed", "reason", err.Error())
 			os.Exit(1)
@@ -124,9 +131,19 @@ type testPlane struct {
 	client  *http.Client
 	tokens  map[string]string
 	compose func(...string) string
+	origins []string
 }
 
 func startFixture(t *testing.T) *testPlane {
+	t.Helper()
+	p := newFixture(t)
+	if got := p.cli("migrate", "up", "--config", p.config); got != "Applied 2 Harvest migrations." {
+		t.Fatalf("fresh PG18 migration: %q", got)
+	}
+	return p
+}
+
+func newFixture(t *testing.T) *testPlane {
 	t.Helper()
 	root, err := filepath.Abs("..")
 	if err != nil {
@@ -139,7 +156,11 @@ func startFixture(t *testing.T) *testPlane {
 	scratch := t.TempDir()
 	project := "harvest-a1-" + strings.ToLower(rand.Text())
 	args := []string{"compose", "-p", project, "-f", "integration/compose.yaml"}
-	env := append(os.Environ(), "HARVEST_TEST_DB_PORT=0")
+	disposablePort, err := localPort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := append(os.Environ(), "HARVEST_TEST_DB_PORT="+disposablePort)
 	compose := func(rest ...string) string {
 		t.Helper()
 		return run(t, root, env, "docker", append(append([]string{}, args...), rest...)...)
@@ -216,9 +237,6 @@ func startFixture(t *testing.T) *testPlane {
 		t.Fatal(err)
 	}
 	t.Cleanup(p.pool.Close)
-	if got := p.cli("migrate", "up", "--config", p.config); got != "Applied 1 Harvest migrations." {
-		t.Fatalf("fresh PG18 migration: %q", got)
-	}
 	return p
 }
 
@@ -255,7 +273,8 @@ func (p *testPlane) start(args ...string) *child {
 	p.t.Helper()
 	c := &child{cmd: exec.Command(p.bin, append([]string{"fixture"}, args...)...), done: make(chan struct{})}
 	c.cmd.Dir = p.scratch
-	c.cmd.Env = append(os.Environ(), "GOMAXPROCS=4")
+	c.cmd.Env = append(os.Environ(), "GOMAXPROCS=4", "HARVEST_TEST_ORIGINS="+strings.Join(p.origins, ","),
+		"HTTP_PROXY=http://127.0.0.1:1", "HTTPS_PROXY=http://127.0.0.1:1", "ALL_PROXY=socks5://127.0.0.1:1", "NO_PROXY=*")
 	c.cmd.Stderr = &c.log
 	if err := c.cmd.Start(); err != nil {
 		p.t.Fatal(err)

@@ -38,4 +38,6 @@ func registerURLs(consumer, worker fiber.Router, h *handlers.API, ready func(con
 	worker.Post("/workers/:id/claim", h.Claim)
 	worker.Post("/attempts/:id/renew", h.Renew())
 	worker.Post("/attempts/:id/complete", h.Complete())
+	worker.Post("/attempts/:id/permit", h.Permit())
+	worker.Post("/permits/:id/finish", h.FinishPermit())
 }

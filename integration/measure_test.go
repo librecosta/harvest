@@ -22,6 +22,7 @@ import (
 
 	"github.com/librecosta/harvest/internal/config"
 	q "github.com/librecosta/harvest/internal/database/queries"
+	"github.com/librecosta/harvest/internal/egress"
 	"github.com/librecosta/harvest/internal/execution"
 	"github.com/librecosta/harvest/internal/provider"
 )
@@ -90,7 +91,7 @@ func processRSS(pid int) string {
 func measurePlans(t *testing.T, p *testPlane) {
 	t.Helper()
 	ctx := t.Context()
-	e := execution.New(p.pool, fixtureRegistry(), nil)
+	e := execution.New(p.pool, fixtureRegistry(), nil, egress.NetworkConfig{})
 	principal := config.Principal{
 		Name: "benchmark", Role: "worker", Namespaces: []string{"benchmark"},
 		MaxSlots: 16, Capabilities: []string{fixtureOffer.Capability},
@@ -158,7 +159,7 @@ func measurePlans(t *testing.T, p *testPlane) {
 		t.Fatal(err)
 	}
 	t.Logf("EXPLAIN sample: %d historical Jobs, %d due Jobs, %d Schedules (10 due)", history, queued, schedules)
-	explain(t, p, "jobs.sql", "LockClaimableJob", []string{"offers", "namespaces"}, []string{fixtureOffer.Key()}, principal.Namespaces)
+	explain(t, p, "jobs.sql", "LockClaimableJob", []string{"offers", "network_offers", "namespaces"}, []string{fixtureOffer.Key()}, []string{}, principal.Namespaces)
 	explain(t, p, "catalog.sql", "LockDueSchedule", []string{"offers"}, []string{fixtureOffer.Key()})
 	var latency []time.Duration
 	for range 2 {

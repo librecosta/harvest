@@ -51,15 +51,19 @@ func (e *Engine) RegisterWorker(ctx context.Context, p config.Principal, in Regi
 	if err != nil {
 		return err
 	}
+	paths, err := e.validatePaths(p, in.Capacity, in.Paths)
+	if err != nil {
+		return err
+	}
 	_, err = tx(ctx, e, func(db *q.Queries) (struct{}, error) {
 		err := db.InsertWorker(ctx, q.InsertWorkerParams{
-			ID: in.ID, Principal: p.Name, Offers: keys, EgressProfiles: profiles, Capacity: in.Capacity,
+			ID: in.ID, Principal: p.Name, Offers: keys, EgressProfiles: profiles, Capacity: in.Capacity, NetworkPaths: paths,
 		})
 		if err != nil {
 			return struct{}{}, err
 		}
 		w, err := found(db.Worker(ctx, q.WorkerParams{ID: in.ID, Principal: p.Name}))
-		if err == nil && (w.Capacity != in.Capacity || !slices.Equal(w.Offers, keys) || !slices.Equal(w.EgressProfiles, profiles)) {
+		if err == nil && (w.Capacity != in.Capacity || !slices.Equal(w.Offers, keys) || !slices.Equal(w.EgressProfiles, profiles) || !samePaths(w.NetworkPaths, paths)) {
 			err = ErrConflict
 		}
 		return struct{}{}, err
@@ -68,19 +72,25 @@ func (e *Engine) RegisterWorker(ctx context.Context, p config.Principal, in Regi
 }
 
 func (e *Engine) Heartbeat(ctx context.Context, p config.Principal, id uuid.UUID, in Heartbeat) (Heartbeat, error) {
-	w, err := found(e.queries.HeartbeatWorker(ctx, q.HeartbeatWorkerParams{ID: id, Principal: p.Name, Draining: in.Draining}))
-	return Heartbeat{Draining: w.Draining || e.draining.Load()}, err
-}
-
-func (e *Engine) allowedOffers(p config.Principal, advertised []string) []string {
-	var offers []string
-	for _, name := range p.Capabilities {
-		c, ok := e.Registry.Capability(name)
-		if ok && c.Execute != nil && slices.Contains(advertised, c.Key()) {
-			offers = append(offers, c.Key())
+	args := q.HeartbeatWorkerParams{ID: id, Principal: p.Name, Draining: in.Draining}
+	if in.Paths != nil {
+		// Registration fixes identity and capacity for the lifetime of the
+		// process. Heartbeats may change only coarse health.
+		old, err := found(e.queries.Worker(ctx, q.WorkerParams{ID: id, Principal: p.Name}))
+		if err != nil {
+			return Heartbeat{}, err
 		}
+		paths, err := e.validatePaths(p, old.Capacity, in.Paths)
+		if err != nil {
+			return Heartbeat{}, err
+		}
+		if !samePaths(old.NetworkPaths, paths) {
+			return Heartbeat{}, ErrConflict
+		}
+		args.Paths = paths
 	}
-	return offers
+	w, err := found(e.queries.HeartbeatWorker(ctx, args))
+	return Heartbeat{Draining: w.Draining || e.draining.Load()}, err
 }
 
 func (e *Engine) Claim(ctx context.Context, p config.Principal, id uuid.UUID) (*Claim, error) {
@@ -105,15 +115,15 @@ func (e *Engine) Claim(ctx context.Context, p config.Principal, id uuid.UUID) (*
 		if slices.ContainsFunc(w.EgressProfiles, func(name string) bool { return !slices.Contains(p.EgressProfiles, name) }) {
 			return nil, ErrForbidden
 		}
-		offers := e.allowedOffers(p, w.Offers)
-		if len(offers) == 0 {
-			return nil, ErrUnsupported
+		offers, networkOffers, err := e.dispatchOffers(ctx, db, p, w)
+		if err != nil || (len(offers) == 0 && len(networkOffers) == 0) {
+			return nil, err
 		}
 		active, err := db.WorkerLeaseCount(ctx, w.ID)
 		if err != nil || active >= int64(min(w.Capacity, p.MaxSlots)) {
 			return nil, err
 		}
-		job, err := db.LockClaimableJob(ctx, q.LockClaimableJobParams{Offers: offers, Namespaces: p.Namespaces})
+		job, err := db.LockClaimableJob(ctx, q.LockClaimableJobParams{Offers: offers, Namespaces: p.Namespaces, NetworkOffers: networkOffers})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
@@ -147,10 +157,18 @@ func (e *Engine) Claim(ctx context.Context, p config.Principal, id uuid.UUID) (*
 		if err != nil {
 			return nil, err
 		}
-		return &Claim{
+		claim := &Claim{
 			Fence: Fence{job.ID, w.ID, job.Generation}, AttemptID: a.ID,
 			LeaseUntil: until.UTC(), LeaseMS: until.Sub(now).Milliseconds(), Task: task,
-		}, nil
+		}
+		if cap, _ := e.Registry.Capability(task.Offer.Capability); cap.Network != nil {
+			paths, err := decodePaths(w.NetworkPaths)
+			if err != nil {
+				return nil, err
+			}
+			claim.Network, _ = e.plan(p, e.source(task.Offer.Capability, task.Namespace), task.Scope.EgressRegion, paths)
+		}
+		return claim, nil
 	})
 }
 
@@ -164,19 +182,20 @@ func leaseEnd(job q.HarvestJob, now time.Time) time.Time {
 
 // The Job row lock is the sole transition lock. All writers of Attempt rows
 // take it first, including cancellation, renewal, expiry and completion.
-func lockAttempt(ctx context.Context, db *q.Queries, p config.Principal, id uuid.UUID, fence Fence) (q.HarvestJob, q.HarvestAttempt, error) {
+func lockAttempt(ctx context.Context, db *q.Queries, p config.Principal, id uuid.UUID, fence Fence) (q.HarvestJob, q.HarvestAttempt, q.HarvestWorker, error) {
 	if !UUIDv7(fence.JobID) || !UUIDv7(fence.WorkerID) || fence.Generation < 1 {
-		return q.HarvestJob{}, q.HarvestAttempt{}, ErrInvalid
+		return q.HarvestJob{}, q.HarvestAttempt{}, q.HarvestWorker{}, ErrInvalid
 	}
 	job, err := lockJob(ctx, db, p, fence.JobID)
 	if err != nil {
-		return job, q.HarvestAttempt{}, err
+		return job, q.HarvestAttempt{}, q.HarvestWorker{}, err
 	}
-	if _, err := found(db.Worker(ctx, q.WorkerParams{ID: fence.WorkerID, Principal: p.Name})); err != nil {
-		return job, q.HarvestAttempt{}, err
+	w, err := found(db.Worker(ctx, q.WorkerParams{ID: fence.WorkerID, Principal: p.Name}))
+	if err != nil {
+		return job, q.HarvestAttempt{}, w, err
 	}
 	a, err := found(db.Attempt(ctx, q.AttemptParams{ID: id, JobID: job.ID, WorkerID: fence.WorkerID, Generation: fence.Generation}))
-	return job, a, err
+	return job, a, w, err
 }
 
 func validLease(job q.HarvestJob, a q.HarvestAttempt, now time.Time) bool {
@@ -186,7 +205,7 @@ func validLease(job q.HarvestJob, a q.HarvestAttempt, now time.Time) bool {
 
 func (e *Engine) Renew(ctx context.Context, p config.Principal, id uuid.UUID, fence Fence) (Renewal, error) {
 	return tx(ctx, e, func(db *q.Queries) (Renewal, error) {
-		job, a, err := lockAttempt(ctx, db, p, id, fence)
+		job, a, _, err := lockAttempt(ctx, db, p, id, fence)
 		if err != nil {
 			return Renewal{}, err
 		}
@@ -215,7 +234,7 @@ func (e *Engine) Renew(ctx context.Context, p config.Principal, id uuid.UUID, fe
 
 func (e *Engine) Complete(ctx context.Context, p config.Principal, id uuid.UUID, in Completion) (Receipt, error) {
 	return tx(ctx, e, func(db *q.Queries) (Receipt, error) {
-		job, a, err := lockAttempt(ctx, db, p, id, in.Fence)
+		job, a, _, err := lockAttempt(ctx, db, p, id, in.Fence)
 		if err != nil {
 			return Receipt{}, err
 		}
@@ -257,6 +276,12 @@ func (e *Engine) Complete(ctx context.Context, p config.Principal, id uuid.UUID,
 			return Receipt{}, ErrFence
 		}
 		state, available := retryState(job, now, result.State, retryable)
+		if state == "retry_wait" && result.Code == "network_quota_deferred" {
+			available = now.Add(10 * time.Second)
+			if !available.Before(job.DeadlineAt) {
+				state, available = result.State, now
+			}
+		}
 		if err := db.FinishAttempt(ctx, q.FinishAttemptParams{
 			ID: a.ID, EndedAt: &now, State: result.State, ErrorCode: result.Code, ResultHash: hash, ReceiptState: &state,
 		}); err != nil {
@@ -279,9 +304,9 @@ func normalizeResult(cap provider.Capability, result provider.Result) (provider.
 			return result, false, ErrInvalid
 		}
 		switch result.Code {
-		case "upstream_unavailable", "transport_error", "timeout", "internal_unavailable":
+		case "upstream_unavailable", "transport_error", "timeout", "internal_unavailable", "network_quota_deferred":
 			retryable = true
-		case "invalid_payload", "policy_denied", "upstream_auth", "incomplete":
+		case "invalid_payload", "policy_denied", "upstream_auth", "upstream_throttled", "incomplete":
 		default:
 			return result, false, ErrInvalid
 		}

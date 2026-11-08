@@ -77,6 +77,9 @@ func (e *Engine) resolve(ctx context.Context, db *q.Queries, p config.Principal,
 		!strings.HasPrefix(cap.Capability, target.Provider+".") {
 		return work{}, ErrInvalid
 	}
+	if cap.Network != nil && cap.Network.RequireRegion && in.Scope.EgressRegion == "" {
+		return work{}, ErrInvalid
+	}
 	params, err := cap.NormalizeParams(in.Params)
 	if err != nil {
 		return work{}, ErrInvalid

@@ -54,6 +54,36 @@ type HarvestJob struct {
 	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
+type HarvestQuotaBucket struct {
+	Key           string    `json:"key"`
+	Balance       int64     `json:"balance"`
+	RefilledAt    time.Time `json:"refilled_at"`
+	CooldownUntil time.Time `json:"cooldown_until"`
+	MetricsFrom   time.Time `json:"metrics_from"`
+	Issued        int64     `json:"issued"`
+	Deferred      int64     `json:"deferred"`
+	Succeeded     int64     `json:"succeeded"`
+	Refused       int64     `json:"refused"`
+	Failed        int64     `json:"failed"`
+	BodyBytes     int64     `json:"body_bytes"`
+	LatencyLe25   int64     `json:"latency_le_25"`
+	LatencyLe100  int64     `json:"latency_le_100"`
+	LatencyLe1000 int64     `json:"latency_le_1000"`
+}
+
+type HarvestQuotaPermit struct {
+	ID          uuid.UUID  `json:"id"`
+	AttemptID   uuid.UUID  `json:"attempt_id"`
+	OperationID uuid.UUID  `json:"operation_id"`
+	RequestHash []byte     `json:"request_hash"`
+	BucketKeys  []string   `json:"bucket_keys"`
+	AccountKey  string     `json:"account_key"`
+	MaxBytes    int64      `json:"max_bytes"`
+	ExpiresAt   time.Time  `json:"expires_at"`
+	FinishedAt  *time.Time `json:"finished_at"`
+	FinishHash  []byte     `json:"finish_hash"`
+}
+
 type HarvestSchedule struct {
 	ID              uuid.UUID `json:"id"`
 	TargetID        uuid.UUID `json:"target_id"`
@@ -101,4 +131,5 @@ type HarvestWorker struct {
 	Capacity       int32     `json:"capacity"`
 	LastSeen       time.Time `json:"last_seen"`
 	Draining       bool      `json:"draining"`
+	NetworkPaths   []byte    `json:"network_paths"`
 }

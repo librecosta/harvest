@@ -16,6 +16,7 @@ import (
 
 	"github.com/librecosta/harvest/internal/config"
 	q "github.com/librecosta/harvest/internal/database/queries"
+	"github.com/librecosta/harvest/internal/egress"
 	"github.com/librecosta/harvest/internal/provider"
 )
 
@@ -26,16 +27,17 @@ type Engine struct {
 	admission      sync.RWMutex
 	draining       atomic.Bool
 	workerPolicies []config.Principal
+	network        egress.NetworkConfig
 }
 
-func New(db *pgxpool.Pool, registry *provider.Registry, principals []config.Principal) *Engine {
+func New(db *pgxpool.Pool, registry *provider.Registry, principals []config.Principal, network egress.NetworkConfig) *Engine {
 	var workers []config.Principal
 	for _, p := range principals {
 		if p.Role == "worker" {
-			workers = append(workers, config.Principal{Name: p.Name, Namespaces: slices.Clone(p.Namespaces), Capabilities: slices.Clone(p.Capabilities)})
+			workers = append(workers, config.Principal{Name: p.Name, Namespaces: slices.Clone(p.Namespaces), Capabilities: slices.Clone(p.Capabilities), EgressProfiles: slices.Clone(p.EgressProfiles)})
 		}
 	}
-	return &Engine{Registry: registry, db: db, queries: q.New(db), workerPolicies: workers}
+	return &Engine{Registry: registry, db: db, queries: q.New(db), workerPolicies: workers, network: network}
 }
 
 func (e *Engine) Drain() {

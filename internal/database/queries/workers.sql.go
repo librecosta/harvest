@@ -125,18 +125,25 @@ func (q *Queries) FinishAttempt(ctx context.Context, arg FinishAttemptParams) er
 }
 
 const heartbeatWorker = `-- name: HeartbeatWorker :one
-UPDATE harvest.workers SET last_seen = clock_timestamp(), draining = draining OR $3::boolean
-WHERE id = $1 AND principal = $2 RETURNING id, principal, offers, egress_profiles, capacity, last_seen, draining
+UPDATE harvest.workers SET last_seen = clock_timestamp(), draining = draining OR $3::boolean,
+    network_paths = coalesce($4::jsonb, network_paths)
+WHERE id = $1 AND principal = $2 RETURNING id, principal, offers, egress_profiles, capacity, last_seen, draining, network_paths
 `
 
 type HeartbeatWorkerParams struct {
 	ID        uuid.UUID `json:"id"`
 	Principal string    `json:"principal"`
 	Draining  bool      `json:"draining"`
+	Paths     []byte    `json:"paths"`
 }
 
 func (q *Queries) HeartbeatWorker(ctx context.Context, arg HeartbeatWorkerParams) (HarvestWorker, error) {
-	row := q.db.QueryRow(ctx, heartbeatWorker, arg.ID, arg.Principal, arg.Draining)
+	row := q.db.QueryRow(ctx, heartbeatWorker,
+		arg.ID,
+		arg.Principal,
+		arg.Draining,
+		arg.Paths,
+	)
 	var i HarvestWorker
 	err := row.Scan(
 		&i.ID,
@@ -146,6 +153,7 @@ func (q *Queries) HeartbeatWorker(ctx context.Context, arg HeartbeatWorkerParams
 		&i.Capacity,
 		&i.LastSeen,
 		&i.Draining,
+		&i.NetworkPaths,
 	)
 	return i, err
 }
@@ -193,8 +201,8 @@ func (q *Queries) InsertAttempt(ctx context.Context, arg InsertAttemptParams) (H
 }
 
 const insertWorker = `-- name: InsertWorker :exec
-INSERT INTO harvest.workers (id, principal, offers, egress_profiles, capacity)
-VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING
+INSERT INTO harvest.workers (id, principal, offers, egress_profiles, capacity, network_paths)
+VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (id) DO NOTHING
 `
 
 type InsertWorkerParams struct {
@@ -203,6 +211,7 @@ type InsertWorkerParams struct {
 	Offers         []string  `json:"offers"`
 	EgressProfiles []string  `json:"egress_profiles"`
 	Capacity       int32     `json:"capacity"`
+	NetworkPaths   []byte    `json:"network_paths"`
 }
 
 func (q *Queries) InsertWorker(ctx context.Context, arg InsertWorkerParams) error {
@@ -212,6 +221,7 @@ func (q *Queries) InsertWorker(ctx context.Context, arg InsertWorkerParams) erro
 		arg.Offers,
 		arg.EgressProfiles,
 		arg.Capacity,
+		arg.NetworkPaths,
 	)
 	return err
 }
@@ -254,7 +264,7 @@ func (q *Queries) JobAttempts(ctx context.Context, jobID uuid.UUID) ([]HarvestAt
 }
 
 const lockWorker = `-- name: LockWorker :one
-SELECT id, principal, offers, egress_profiles, capacity, last_seen, draining FROM harvest.workers WHERE id = $1 AND principal = $2 FOR UPDATE
+SELECT id, principal, offers, egress_profiles, capacity, last_seen, draining, network_paths FROM harvest.workers WHERE id = $1 AND principal = $2 FOR UPDATE
 `
 
 type LockWorkerParams struct {
@@ -273,8 +283,50 @@ func (q *Queries) LockWorker(ctx context.Context, arg LockWorkerParams) (Harvest
 		&i.Capacity,
 		&i.LastSeen,
 		&i.Draining,
+		&i.NetworkPaths,
 	)
 	return i, err
+}
+
+const networkWorkers = `-- name: NetworkWorkers :many
+SELECT id, principal, offers, egress_profiles, capacity, last_seen, draining, network_paths FROM harvest.workers WHERE principal = ANY($1::text[]) AND NOT draining
+  AND last_seen > statement_timestamp() - interval '30 seconds'
+  AND $2::text = ANY(offers)
+ORDER BY last_seen DESC LIMIT 100
+`
+
+type NetworkWorkersParams struct {
+	Principals   []string `json:"principals"`
+	ExecutionKey string   `json:"execution_key"`
+}
+
+func (q *Queries) NetworkWorkers(ctx context.Context, arg NetworkWorkersParams) ([]HarvestWorker, error) {
+	rows, err := q.db.Query(ctx, networkWorkers, arg.Principals, arg.ExecutionKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []HarvestWorker{}
+	for rows.Next() {
+		var i HarvestWorker
+		if err := rows.Scan(
+			&i.ID,
+			&i.Principal,
+			&i.Offers,
+			&i.EgressProfiles,
+			&i.Capacity,
+			&i.LastSeen,
+			&i.Draining,
+			&i.NetworkPaths,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const pruneWorkers = `-- name: PruneWorkers :exec
@@ -322,7 +374,7 @@ func (q *Queries) RenewAttempt(ctx context.Context, arg RenewAttemptParams) (Har
 }
 
 const worker = `-- name: Worker :one
-SELECT id, principal, offers, egress_profiles, capacity, last_seen, draining FROM harvest.workers WHERE id = $1 AND principal = $2
+SELECT id, principal, offers, egress_profiles, capacity, last_seen, draining, network_paths FROM harvest.workers WHERE id = $1 AND principal = $2
 `
 
 type WorkerParams struct {
@@ -341,6 +393,7 @@ func (q *Queries) Worker(ctx context.Context, arg WorkerParams) (HarvestWorker, 
 		&i.Capacity,
 		&i.LastSeen,
 		&i.Draining,
+		&i.NetworkPaths,
 	)
 	return i, err
 }
@@ -358,16 +411,17 @@ func (q *Queries) WorkerLeaseCount(ctx context.Context, workerID uuid.UUID) (int
 }
 
 const workerSummary = `-- name: WorkerSummary :many
-SELECT id, capacity, last_seen, draining FROM harvest.workers
+SELECT id, capacity, last_seen, draining, network_paths FROM harvest.workers
 WHERE principal = ANY($1::text[]) AND last_seen >= statement_timestamp() - interval '30 seconds'
 ORDER BY last_seen DESC, id LIMIT 100
 `
 
 type WorkerSummaryRow struct {
-	ID       uuid.UUID `json:"id"`
-	Capacity int32     `json:"capacity"`
-	LastSeen time.Time `json:"last_seen"`
-	Draining bool      `json:"draining"`
+	ID           uuid.UUID `json:"id"`
+	Capacity     int32     `json:"capacity"`
+	LastSeen     time.Time `json:"last_seen"`
+	Draining     bool      `json:"draining"`
+	NetworkPaths []byte    `json:"network_paths"`
 }
 
 func (q *Queries) WorkerSummary(ctx context.Context, principals []string) ([]WorkerSummaryRow, error) {
@@ -384,6 +438,7 @@ func (q *Queries) WorkerSummary(ctx context.Context, principals []string) ([]Wor
 			&i.Capacity,
 			&i.LastSeen,
 			&i.Draining,
+			&i.NetworkPaths,
 		); err != nil {
 			return nil, err
 		}

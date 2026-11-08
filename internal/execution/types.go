@@ -6,19 +6,22 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/librecosta/harvest/internal/egress"
 	"github.com/librecosta/harvest/internal/provider"
 )
 
 var (
-	ErrInvalid     = errors.New("invalid_request")
-	ErrForbidden   = errors.New("forbidden")
-	ErrNotFound    = errors.New("not_found")
-	ErrConflict    = errors.New("conflict")
-	ErrUnsupported = errors.New("capability_unavailable")
-	ErrDraining    = errors.New("draining")
-	ErrFence       = errors.New("lease_lost")
-	ErrCancelled   = errors.New("cancel_requested")
-	ErrTerminal    = errors.New("already_terminal")
+	ErrInvalid           = errors.New("invalid_request")
+	ErrForbidden         = errors.New("forbidden")
+	ErrNotFound          = errors.New("not_found")
+	ErrConflict          = errors.New("conflict")
+	ErrUnsupported       = errors.New("capability_unavailable")
+	ErrDraining          = errors.New("draining")
+	ErrFence             = errors.New("lease_lost")
+	ErrCancelled         = errors.New("cancel_requested")
+	ErrTerminal          = errors.New("already_terminal")
+	ErrQuotaBudget       = errors.New("network_budget_exhausted")
+	ErrEgressUnavailable = errors.New("egress_unavailable")
 )
 
 const (
@@ -71,14 +74,16 @@ type Submit struct {
 }
 
 type Registration struct {
-	ID             uuid.UUID        `json:"id"`
-	Offers         []provider.Offer `json:"offers"`
-	EgressProfiles []string         `json:"egress_profiles,omitempty"`
-	Capacity       int32            `json:"capacity"`
+	ID             uuid.UUID              `json:"id"`
+	Offers         []provider.Offer       `json:"offers"`
+	EgressProfiles []string               `json:"egress_profiles,omitempty"`
+	Capacity       int32                  `json:"capacity"`
+	Paths          []egress.Advertisement `json:"paths,omitempty"`
 }
 
 type Heartbeat struct {
-	Draining bool `json:"draining"`
+	Draining bool                   `json:"draining"`
+	Paths    []egress.Advertisement `json:"paths,omitempty"`
 }
 
 type Claim struct {
@@ -87,6 +92,7 @@ type Claim struct {
 	LeaseUntil time.Time     `json:"lease_until"`
 	LeaseMS    int64         `json:"lease_ms"`
 	Task       provider.Task `json:"task"`
+	Network    *egress.Plan  `json:"network,omitempty"`
 }
 
 type Fence struct {

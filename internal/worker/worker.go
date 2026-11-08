@@ -14,6 +14,7 @@ import (
 	"uuid"
 
 	"github.com/librecosta/harvest/internal/config"
+	"github.com/librecosta/harvest/internal/egress"
 	"github.com/librecosta/harvest/internal/execution"
 	"github.com/librecosta/harvest/internal/provider"
 )
@@ -24,6 +25,9 @@ func Validate(cfg config.Worker, registry *provider.Registry) error {
 		if !ok || c.Execute == nil || c.Offer != offer {
 			return errors.New("worker offer is not compiled and executable in this binary")
 		}
+		if c.Network != nil && len(cfg.Egress.Profiles) == 0 {
+			return errors.New("network worker offer requires a configured egress profile")
+		}
 	}
 	return nil
 }
@@ -32,9 +36,12 @@ func Run(ctx context.Context, cfg config.Worker, registry *provider.Registry, lo
 	if err := Validate(cfg, registry); err != nil {
 		return err
 	}
+	pool := egress.NewPool(cfg.Egress)
+	defer pool.Close()
+	pool.Probe(ctx)
 	api := newClient(cfg)
 	defer api.http.CloseIdleConnections()
-	reg := execution.Registration{ID: uuid.NewV7(), Offers: cfg.Offers, Capacity: cfg.Concurrency, EgressProfiles: cfg.EgressProfiles}
+	reg := execution.Registration{ID: uuid.NewV7(), Offers: cfg.Offers, Capacity: cfg.Concurrency, EgressProfiles: cfg.EgressProfiles, Paths: pool.Advertise(cfg.Concurrency)}
 	for {
 		_, err := api.request(ctx, http.MethodPost, "/workers/register", reg, nil)
 		if ctx.Err() != nil {
@@ -62,8 +69,10 @@ func Run(ctx context.Context, cfg config.Worker, registry *provider.Registry, lo
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				pool.Probe(ctx)
+				paths := pool.Advertise(cfg.Concurrency)
 				var out execution.Heartbeat
-				_, err := api.request(ctx, http.MethodPost, base+"/heartbeat", execution.Heartbeat{}, &out)
+				_, err := api.request(ctx, http.MethodPost, base+"/heartbeat", execution.Heartbeat{Paths: paths}, &out)
 				paused.Store(err != nil || out.Draining)
 				if responseCode(err, "not_found") {
 					_, _ = api.request(ctx, http.MethodPost, "/workers/register", reg, nil)
@@ -79,7 +88,7 @@ func Run(ctx context.Context, cfg config.Worker, registry *provider.Registry, lo
 					started := time.Now()
 					ok, err := api.request(ctx, http.MethodPost, base+"/claim", nil, &claim)
 					if err == nil && ok {
-						execute(life, api, registry, claim, started)
+						execute(life, api, registry, pool, claim, started)
 					}
 				}
 				wait(ctx, time.Second+time.Duration(rand.IntN(250))*time.Millisecond)
@@ -87,6 +96,7 @@ func Run(ctx context.Context, cfg config.Worker, registry *provider.Registry, lo
 		})
 	}
 	<-ctx.Done()
+	pool.Drain()
 	done := make(chan struct{})
 	go func() { loops.Wait(); close(done) }()
 	drain, cancel := context.WithTimeout(life, execution.PreDrain)
@@ -117,7 +127,7 @@ func wait(ctx context.Context, duration time.Duration) {
 
 const safetyMargin = 100 * time.Millisecond
 
-func execute(ctx context.Context, api client, registry *provider.Registry, claim execution.Claim, started time.Time) {
+func execute(ctx context.Context, api client, registry *provider.Registry, pool *egress.Pool, claim execution.Claim, started time.Time) {
 	cap, ok := registry.Capability(claim.Task.Offer.Capability)
 	if !ok || cap.Execute == nil || cap.Offer != claim.Task.Offer || claim.LeaseMS < 1 {
 		return
@@ -128,6 +138,15 @@ func execute(ctx context.Context, api client, registry *provider.Registry, claim
 	}
 	workCtx, cancelWork := context.WithTimeout(ctx, cap.Timeout)
 	defer cancelWork()
+	var network egress.Client
+	if cap.Network != nil {
+		if claim.Network == nil {
+			return
+		}
+		session := pool.Session(workCtx, *claim.Network, *cap.Network, claim.Task.Namespace, cap.Capability, permitGate{api, claim})
+		defer session.Close()
+		network = session.Client()
+	}
 	result := make(chan provider.Result, 1)
 	go func() {
 		key, err := registry.Normalize(claim.Task.Provider, claim.Task.Resource, claim.Task.ExternalKey)
@@ -137,7 +156,7 @@ func execute(ctx context.Context, api client, registry *provider.Registry, claim
 			return
 		}
 		claim.Task.Params = params
-		result <- cap.Execute(workCtx, claim.Task)
+		result <- cap.Execute(workCtx, claim.Task, network)
 	}()
 	base := "/attempts/" + claim.AttemptID.String()
 	timer := time.NewTimer(time.Until(deadline))
@@ -176,6 +195,7 @@ func execute(ctx context.Context, api client, registry *provider.Registry, claim
 		case <-timer.C:
 			return
 		case outcome := <-completed:
+			cancelWork()
 			completed, workDone = nil, nil
 			pending = &outcome
 		case <-workDone:

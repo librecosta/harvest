@@ -62,7 +62,11 @@ func Run(ctx context.Context, cfg config.Config, registry *provider.Registry, lo
 		}
 		return err
 	}
-	engine := execution.New(pool, registry, cfg.Principals)
+	engine := execution.New(pool, registry, cfg.Principals, cfg.Network)
+	if err := engine.PrepareNetwork(ctx); err != nil {
+		pool.Close()
+		return err
+	}
 	if cfg.LocalWorker != nil {
 		for _, principal := range cfg.Principals {
 			if principal.Token == cfg.LocalWorker.Token {
@@ -210,6 +214,8 @@ func maintain(ctx context.Context, engine *execution.Engine, logger *slog.Logger
 	defer reconcile.Stop()
 	prune := time.NewTicker(time.Minute)
 	defer prune.Stop()
+	permits := time.NewTicker(10 * time.Second)
+	defer permits.Stop()
 	failed := false
 	for {
 		select {
@@ -230,6 +236,13 @@ func maintain(ctx context.Context, engine *execution.Engine, logger *slog.Logger
 			}
 			failed = err != nil
 			reconcile.Reset(delay)
+		case <-permits.C:
+			run, cancel := context.WithTimeout(ctx, 2*time.Second)
+			err := engine.PrunePermits(run)
+			cancel()
+			if err != nil && ctx.Err() == nil {
+				logger.Warn("permit pruning unavailable")
+			}
 		case <-prune.C:
 			run, cancel := context.WithTimeout(ctx, 2*time.Second)
 			err := engine.Prune(run)
