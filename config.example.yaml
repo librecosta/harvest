@@ -10,6 +10,16 @@ database:
   tls_mode: "verify-full"
   max_connections: 4
 
+# Optional per-namespace retention budgets. Values below are the defaults.
+# retention:
+#   event_days: 14
+#   history_days: 30
+#   sample_days: 30
+#   event_rows: 100000
+#   event_bytes: 268435456
+#   history_rows: 200000
+#   history_bytes: 536870912
+
 # Configure separate generated tokens for service principals.
 # principals:
 #   - name: "harvest_operator"

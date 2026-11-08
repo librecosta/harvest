@@ -7,6 +7,7 @@ import (
 
 	"github.com/librecosta/harvest/internal/config"
 	"github.com/librecosta/harvest/internal/execution"
+	"github.com/librecosta/harvest/internal/provider"
 )
 
 func (a *API) RegisterWorker() fiber.Handler {
@@ -48,7 +49,7 @@ func (a *API) Renew() fiber.Handler {
 }
 
 func (a *API) Complete() fiber.Handler {
-	return action(a, 200, func(c fiber.Ctx, p config.Principal, in execution.Completion) (any, error) {
+	return boundedAction(a, 200, provider.MaxCompletionBody, func(c fiber.Ctx, p config.Principal, in execution.Completion) (any, error) {
 		id, err := pathID(c)
 		if err != nil {
 			return nil, err

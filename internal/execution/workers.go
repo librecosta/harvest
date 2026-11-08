@@ -246,6 +246,21 @@ func (e *Engine) Complete(ctx context.Context, p config.Principal, id uuid.UUID,
 		if err != nil {
 			return Receipt{}, err
 		}
+		var segments []acceptedSegment
+		if cap.Observation != nil && result.State != "cancelled" && (result.State != "failed" || len(result.Segments) != 0) {
+			work, err := e.resolveStored(ctx, db, []string{job.Namespace}, job.TargetID, job.Capability, job.ExecutionKey, job.Params, job.Scope, job.Fingerprint)
+			if err != nil {
+				return Receipt{}, err
+			}
+			task, err := work.task()
+			if err != nil {
+				return Receipt{}, err
+			}
+			segments, err = normalizeSegments(cap, task, &result)
+			if err != nil {
+				return Receipt{}, err
+			}
+		}
 		hash, err := hashValue(result)
 		if err != nil {
 			return Receipt{}, err
@@ -275,6 +290,12 @@ func (e *Engine) Complete(ctx context.Context, p config.Principal, id uuid.UUID,
 		default:
 			return Receipt{}, ErrFence
 		}
+		if len(segments) != 0 {
+			now, err = e.writeObservations(ctx, db, job, a, segments, cap.Observation.Sample, now)
+			if err != nil {
+				return Receipt{}, err
+			}
+		}
 		state, available := retryState(job, now, result.State, retryable)
 		if state == "retry_wait" && result.Code == "network_quota_deferred" {
 			available = now.Add(10 * time.Second)
@@ -288,6 +309,13 @@ func (e *Engine) Complete(ctx context.Context, p config.Principal, id uuid.UUID,
 			return Receipt{}, err
 		}
 		_, err = setState(ctx, db, job, state, result.Code, now, available, &a.ID, hash)
+		if err == nil && len(segments) != 0 {
+			var end time.Time
+			end, err = db.DBNow(ctx)
+			if err == nil && !validLease(job, a, end) {
+				return Receipt{}, ErrFence
+			}
+		}
 		return Receipt{a.ID, job.ID, state, now.UTC()}, err
 	})
 }
@@ -315,6 +343,15 @@ func normalizeResult(cap provider.Capability, result provider.Result) (provider.
 			return result, false, ErrInvalid
 		}
 	default:
+		return result, false, ErrInvalid
+	}
+	if cap.Observation != nil {
+		if len(result.Data) != 0 || (result.State == "cancelled" && len(result.Segments) != 0) {
+			return result, false, ErrInvalid
+		}
+		return result, retryable, nil
+	}
+	if len(result.Segments) != 0 {
 		return result, false, ErrInvalid
 	}
 	if result.State == "failed" || result.State == "cancelled" {

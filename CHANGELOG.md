@@ -1,5 +1,12 @@
 # Changelog
 
+## V0.1-A3
+
+- Added typed multi-scope observations, last-known-good results and
+  commit-ordered changes in the existing fenced completion transaction.
+- Added scoped consumer enrollment, monotonic ACK, keyset snapshots and
+  bounded retention with explicit cursor expiry.
+
 ## V0.1-A2
 
 - Added scoped Worker HTTP execution through direct, HTTP CONNECT, HTTPS

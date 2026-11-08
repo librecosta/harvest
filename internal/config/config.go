@@ -30,6 +30,7 @@ type Config struct {
 	Principals  []Principal          `mapstructure:"principals"`
 	LocalWorker *Worker              `mapstructure:"local_worker"`
 	Network     egress.NetworkConfig `mapstructure:"network"`
+	Retention   Retention            `mapstructure:"retention"`
 }
 
 type HTTP struct {
@@ -48,11 +49,19 @@ type Database struct {
 
 func Load(path string) (Config, error) {
 	var cfg Config
+	r := DefaultRetention()
 	err := decode(path, &cfg, map[string]any{
 		"http.listen":              "127.0.0.1:8080",
 		"database.port":            5432,
 		"database.tls_mode":        "verify-full",
 		"database.max_connections": 4,
+		"retention.event_days":     r.EventDays,
+		"retention.history_days":   r.HistoryDays,
+		"retention.sample_days":    r.SampleDays,
+		"retention.event_rows":     r.EventRows,
+		"retention.event_bytes":    r.EventBytes,
+		"retention.history_rows":   r.HistoryRows,
+		"retention.history_bytes":  r.HistoryBytes,
 	})
 	if err != nil {
 		return cfg, err
@@ -61,6 +70,9 @@ func Load(path string) (Config, error) {
 		return cfg, err
 	}
 	if err := validateNetwork(cfg); err != nil {
+		return cfg, err
+	}
+	if err := cfg.Retention.validate(); err != nil {
 		return cfg, err
 	}
 	return cfg, validatePrincipals(cfg)

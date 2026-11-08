@@ -48,5 +48,30 @@ server removes batches of 256. Bucket usage aggregates reset at UTC midnight.
 Bucket balances and source cooldowns survive that reset. Startup may ensure
 configured bucket rows after schema compatibility succeeds.
 
+A3 completion locks the Job and verifies its Attempt fence, then takes a
+transaction-scoped lock on the Target and capability. It reads current rows
+in canonical scope order, which also serializes writes to a previously
+absent scope. Result writes that add history or events then lock the
+namespace's stream head. Each completion touches one namespace. The writer
+allocates contiguous positions under that lock and commits the Attempt, Job,
+Observation, current reference and events together. A rollback releases all
+reserved positions. Positions determine delivery order. `committed_at`
+records the database clock while the writer holds the stream head lock.
+
+Current results reference immutable observations. Identical details and
+`not_modified` update confirmation freshness only. Event references also pin
+observations. Job and Attempt lineage consists of UUIDs independent of
+execution retention. Authoritative withdrawals carry a scoped tombstone and
+remove current data. Each completed sample has its own observation and event.
+
+The maintenance loop processes short transactions per stream. It locks the
+head, marks lagging consumers and invalidates any reset protection crossed
+by hard retention pressure, then removes a prefix of at most 128 events.
+It scans up to 512 observations per batch and removes at most 128 unpinned
+rows. The history scan checkpoint advances over pinned rows. Physical disk
+use also depends on indexes, TOAST, dead tuples, WAL and autovacuum. The
+configured budgets use estimated encoded row and replay sizes. Restore of a
+stream to an earlier head requires a new epoch and fresh consumer baselines.
+
 Use `task check:containers` for failure injection. It provisions disposable
 credentials and a separate PostgreSQL instance for each test project.

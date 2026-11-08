@@ -91,6 +91,6 @@ tasks:
       - docker build -t harvest:local .
 
   check:containers:
-    desc: Verify Docker lifecycle, durable execution and metered egress on disposable PostgreSQL 18
+    desc: Verify lifecycle, execution, metered egress and result recovery on disposable PostgreSQL 18
     cmds:
       - go test -tags=integration -count=1 -timeout=8m -v ./integration

@@ -96,6 +96,9 @@ func fixtureRegistry() *provider.Registry {
 			},
 		}},
 	}
+	if os.Getenv("HARVEST_TEST_OBSERVATIONS") == "true" {
+		manifest.Capabilities = append(manifest.Capabilities, a3Capability(false), a3Capability(true))
+	}
 	if origins := os.Getenv("HARVEST_TEST_ORIGINS"); origins != "" {
 		manifest.Capabilities = append(manifest.Capabilities, fixtureNetwork(strings.Split(origins, ",")))
 	}
@@ -122,22 +125,23 @@ func TestMain(m *testing.M) {
 }
 
 type testPlane struct {
-	t       *testing.T
-	scratch string
-	bin     string
-	config  string
-	address string
-	pool    *pgxpool.Pool
-	client  *http.Client
-	tokens  map[string]string
-	compose func(...string) string
-	origins []string
+	t            *testing.T
+	scratch      string
+	bin          string
+	config       string
+	address      string
+	pool         *pgxpool.Pool
+	client       *http.Client
+	tokens       map[string]string
+	compose      func(...string) string
+	origins      []string
+	observations bool
 }
 
 func startFixture(t *testing.T) *testPlane {
 	t.Helper()
 	p := newFixture(t)
-	if got := p.cli("migrate", "up", "--config", p.config); got != "Applied 2 Harvest migrations." {
+	if got := p.cli("migrate", "up", "--config", p.config); got != "Applied 3 Harvest migrations." {
 		t.Fatalf("fresh PG18 migration: %q", got)
 	}
 	return p
@@ -274,6 +278,7 @@ func (p *testPlane) start(args ...string) *child {
 	c := &child{cmd: exec.Command(p.bin, append([]string{"fixture"}, args...)...), done: make(chan struct{})}
 	c.cmd.Dir = p.scratch
 	c.cmd.Env = append(os.Environ(), "GOMAXPROCS=4", "HARVEST_TEST_ORIGINS="+strings.Join(p.origins, ","),
+		fmt.Sprintf("HARVEST_TEST_OBSERVATIONS=%t", p.observations),
 		"HTTP_PROXY=http://127.0.0.1:1", "HTTPS_PROXY=http://127.0.0.1:1", "ALL_PROXY=socks5://127.0.0.1:1", "NO_PROXY=*")
 	c.cmd.Stderr = &c.log
 	if err := c.cmd.Start(); err != nil {

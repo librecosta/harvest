@@ -19,6 +19,7 @@ type Operations struct {
 	RetainedPermits int64                `json:"retained_permits"`
 	DBPressure      DBPressure           `json:"db_pressure"`
 	Draining        bool                 `json:"draining"`
+	Results         ResultStorage        `json:"results"`
 }
 
 type WorkerStatus struct {
@@ -84,6 +85,9 @@ func (e *Engine) Operations(ctx context.Context, p config.Principal, namespace s
 			return Operations{}, err
 		}
 		out.RetainedPermits, err = e.queries.QuotaPermitCount(ctx, keys)
+	}
+	if err == nil {
+		out.Results, err = e.resultStorage(ctx, p, namespace)
 	}
 	return out, err
 }

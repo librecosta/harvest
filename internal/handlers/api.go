@@ -104,6 +104,12 @@ func (a *API) respond(c fiber.Ctx, status int, value any, err error) error {
 	info := request(c)
 	var pgErr *pgconn.PgError
 	switch {
+	case errors.Is(err, execution.ErrCursorExpired):
+		return problem(c, 410, err.Error(), info.id)
+	case errors.Is(err, execution.ErrTooLarge):
+		return problem(c, 413, err.Error(), info.id)
+	case errors.Is(err, execution.ErrStoragePressure):
+		return problem(c, 503, err.Error(), info.id)
 	case errors.Is(err, execution.ErrInvalid):
 		return problem(c, 400, err.Error(), info.id)
 	case errors.Is(err, execution.ErrForbidden):
@@ -160,12 +166,20 @@ func problem(c fiber.Ctx, status int, code, id string) error {
 }
 
 func action[T any](a *API, status int, run func(fiber.Ctx, config.Principal, T) (any, error)) fiber.Handler {
+	return boundedAction(a, status, execution.MaxBodySize, run)
+}
+
+func boundedAction[T any](a *API, status, limit int, run func(fiber.Ctx, config.Principal, T) (any, error)) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		var in T
 		media, _, err := mime.ParseMediaType(c.Get(fiber.HeaderContentType))
-		body := bytes.TrimSpace(c.BodyRaw())
+		raw := c.BodyRaw()
+		if len(raw) > limit {
+			return a.respond(c, status, nil, execution.ErrTooLarge)
+		}
+		body := bytes.TrimSpace(raw)
 		if err != nil || media != "application/json" || c.Get("Content-Encoding") != "" ||
-			len(body) > execution.MaxBodySize || len(body) == 0 ||
+			len(body) == 0 ||
 			body[0] != '{' ||
 			json.Unmarshal(body, &in, json.RejectUnknownMembers(true)) != nil {
 			return a.respond(c, status, nil, execution.ErrInvalid)

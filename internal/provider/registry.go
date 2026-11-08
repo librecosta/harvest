@@ -65,9 +65,10 @@ type Task struct {
 }
 
 type Result struct {
-	State string         `json:"state"`
-	Code  string         `json:"code,omitempty"`
-	Data  jsontext.Value `json:"data,omitempty"`
+	State    string         `json:"state"`
+	Code     string         `json:"code,omitempty"`
+	Data     jsontext.Value `json:"data,omitempty"`
+	Segments []Segment      `json:"segments,omitempty"`
 }
 
 type Resource struct {
@@ -83,6 +84,7 @@ type Capability struct {
 	Partial         bool
 	NormalizeParams func(jsontext.Value) (jsontext.Value, error)
 	NormalizeOutput func(jsontext.Value) (jsontext.Value, error)
+	Observation     *ObservationPolicy
 	Network         *egress.Source
 	Execute         func(context.Context, Task, egress.Client) Result
 }
@@ -129,8 +131,8 @@ func New(manifests ...Manifest) (*Registry, error) {
 			if !ok || name != m.Name || !Identifier(operation) || !resources[c.Resource] ||
 				c.RequestSchema < 1 || c.OutputSchema < 1 || !Identifier(c.Implementation) ||
 				c.MinInterval < time.Second || c.Timeout < time.Second || c.Timeout > 2*time.Minute ||
-				c.NormalizeParams == nil || c.NormalizeOutput == nil || r.caps[c.Capability].Capability != "" ||
-				(c.Network != nil && !c.Network.Valid()) {
+				c.NormalizeParams == nil || (c.Observation == nil && c.NormalizeOutput == nil) || r.caps[c.Capability].Capability != "" ||
+				(c.Network != nil && !c.Network.Valid()) || (c.Observation != nil && !c.Observation.valid()) {
 				return nil, errors.New("invalid capability registration")
 			}
 			r.caps[c.Capability] = c

@@ -343,8 +343,8 @@ func testSchedules(t *testing.T, p *testPlane) {
 	t.Helper()
 	ctx := t.Context()
 	registry := fixtureRegistry()
-	e := execution.New(p.pool, registry, nil, egress.NetworkConfig{})
-	second := execution.New(p.pool, registry, nil, egress.NetworkConfig{})
+	e := execution.New(p.pool, registry, nil, egress.NetworkConfig{}, config.DefaultRetention())
+	second := execution.New(p.pool, registry, nil, egress.NetworkConfig{}, config.DefaultRetention())
 	auth := config.Principal{Name: "schedule_test", Role: "operator", Namespaces: []string{"scheduler"}}
 	target, err := e.RegisterTarget(ctx, auth, execution.TargetInput{Provider: "fixture", ResourceType: "key", ExternalKey: "calendar", Namespace: "scheduler"})
 	if err != nil {
@@ -382,7 +382,7 @@ func testSchedules(t *testing.T, p *testPlane) {
 			t.Fatal(err)
 		}
 	}
-	e = execution.New(p.pool, registry, nil, egress.NetworkConfig{})
+	e = execution.New(p.pool, registry, nil, egress.NetworkConfig{}, config.DefaultRetention())
 	if err := e.Reconcile(ctx); err != nil {
 		t.Fatal(err)
 	}

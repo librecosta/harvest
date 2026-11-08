@@ -31,6 +31,13 @@ func registerURLs(consumer, worker fiber.Router, h *handlers.API, ready func(con
 	consumer.Post("/jobs/:id/cancel", operator, h.CancelJob)
 	consumer.Post("/jobs/:id/retry", operator, h.RetryJob)
 	consumer.Get("/operations/status", operator, h.Operations)
+	consumer.Get("/observations/current", h.CurrentResults)
+	consumer.Get("/observations/history", h.ObservationHistory)
+	consumer.Get("/changes", h.Changes)
+	consumer.Get("/snapshots/current", h.Snapshot)
+	consumer.Post("/consumers", operator, h.EnrollConsumer())
+	consumer.Post("/consumers/:id/reset", h.StartReset())
+	consumer.Post("/consumers/:id/ack", h.Acknowledge())
 
 	worker.Get("/readyz", h.WorkerReady(ready))
 	worker.Post("/workers/register", h.RegisterWorker())

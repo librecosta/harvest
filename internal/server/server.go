@@ -62,7 +62,7 @@ func Run(ctx context.Context, cfg config.Config, registry *provider.Registry, lo
 		}
 		return err
 	}
-	engine := execution.New(pool, registry, cfg.Principals, cfg.Network)
+	engine := execution.New(pool, registry, cfg.Principals, cfg.Network, cfg.Retention)
 	if err := engine.PrepareNetwork(ctx); err != nil {
 		pool.Close()
 		return err
@@ -216,7 +216,9 @@ func maintain(ctx context.Context, engine *execution.Engine, logger *slog.Logger
 	defer prune.Stop()
 	permits := time.NewTicker(10 * time.Second)
 	defer permits.Stop()
-	failed := false
+	results := time.NewTicker(2 * time.Second)
+	defer results.Stop()
+	failed, resultsFailed := false, false
 	for {
 		select {
 		case <-ctx.Done():
@@ -243,6 +245,16 @@ func maintain(ctx context.Context, engine *execution.Engine, logger *slog.Logger
 			if err != nil && ctx.Err() == nil {
 				logger.Warn("permit pruning unavailable")
 			}
+		case <-results.C:
+			run, cancel := context.WithTimeout(ctx, time.Second)
+			err := engine.PruneResults(run)
+			cancel()
+			if err != nil && !resultsFailed && ctx.Err() == nil {
+				logger.Warn("result pruning unavailable")
+			} else if err == nil && resultsFailed {
+				logger.Info("result pruning recovered")
+			}
+			resultsFailed = err != nil
 		case <-prune.C:
 			run, cancel := context.WithTimeout(ctx, 2*time.Second)
 			err := engine.Prune(run)

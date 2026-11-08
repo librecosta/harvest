@@ -16,6 +16,11 @@ an Attempt-fenced permit before dialing. `internal/execution` derives quota
 buckets from server YAML, the stored Job, compiled capability and authorized
 Worker path. The Worker releases a permit after closing the body.
 
+`internal/execution` also owns scoped Observation acceptance, last-known-good,
+change-stream cursors and retention. It commits acquisition results under the
+same Attempt fence. `internal/server` runs bounded result pruning with the
+other maintenance loops.
+
 `internal/server` owns the pool, Scheduler, optional embedded worker and
 Fiber. Startup checks schema compatibility before binding. OnListen enables
 readiness and starts managed loops. Shutdown closes admission, stops
@@ -38,3 +43,5 @@ the checkout. The request cancels the same context used for OS signals.
 - [A1 acceptance](../docs/harvest-v0.1-a1-acceptance.md)
 - [A2 implementation scope](../docs/harvest-v0.1-a2-proxy-egress-global-quota.md)
 - [A2 acceptance](../docs/harvest-v0.1-a2-acceptance.md)
+- [A3 implementation scope](../docs/harvest-v0.1-a3-observation-change-stream-retention.md)
+- [A3 acceptance and recovery](../docs/harvest-v0.1-a3-acceptance.md)

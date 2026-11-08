@@ -1,10 +1,11 @@
 # Harvest
 
 Harvest is a standalone Go data acquisition engine. Its durable control plane
-manages Targets, schedules and Worker leases. V0.1-A2 adds Worker-local proxy
-routing and PostgreSQL-backed quotas on every outbound HTTP round trip.
-Production discovery reports Web and Steam as `not_implemented`. The isolated
-integration suite uses a test-only Provider and local origins and proxies.
+manages Targets, schedules and Worker leases, meters outbound HTTP across
+Workers, and stores typed, scoped observations. Consumers can read the latest
+good results and replay changes or recover through a snapshot. Production
+discovery reports Web and Steam as `not_implemented`. The integration suite
+uses test-only Providers and isolated PostgreSQL and network fixtures.
 
 ## Local development
 
@@ -75,6 +76,11 @@ URLs and credentials in the ignored Worker YAML. Direct fallback requires
 `prefer_proxy` with `allow_direct: true` on both sides and a capability that
 permits direct access. A2 supports fixed-origin HTTP(S) over direct connections,
 HTTP(S) CONNECT and SOCKS5. See the [A2 acceptance record](docs/harvest-v0.1-a2-acceptance.md).
+
+Use `GET /api/v1/observations/current` and `/observations/history` for scoped
+reads. Operators enroll consumers explicitly. Consumers poll `/changes`,
+durably apply the feed, then ACK. See the [A3 acceptance and recovery guide](docs/harvest-v0.1-a3-acceptance.md)
+for cursor recovery, retention limits and the integration checks.
 
 ## Docker
 

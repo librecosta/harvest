@@ -91,7 +91,7 @@ func processRSS(pid int) string {
 func measurePlans(t *testing.T, p *testPlane) {
 	t.Helper()
 	ctx := t.Context()
-	e := execution.New(p.pool, fixtureRegistry(), nil, egress.NetworkConfig{})
+	e := execution.New(p.pool, fixtureRegistry(), nil, egress.NetworkConfig{}, config.DefaultRetention())
 	principal := config.Principal{
 		Name: "benchmark", Role: "worker", Namespaces: []string{"benchmark"},
 		MaxSlots: 16, Capabilities: []string{fixtureOffer.Capability},

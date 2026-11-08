@@ -21,23 +21,31 @@ import (
 )
 
 type Engine struct {
-	Registry       *provider.Registry
-	db             *pgxpool.Pool
-	queries        *q.Queries
-	admission      sync.RWMutex
-	draining       atomic.Bool
-	workerPolicies []config.Principal
-	network        egress.NetworkConfig
+	Registry         *provider.Registry
+	db               *pgxpool.Pool
+	queries          *q.Queries
+	admission        sync.RWMutex
+	draining         atomic.Bool
+	workerPolicies   []config.Principal
+	network          egress.NetworkConfig
+	retention        config.Retention
+	consumerPolicies map[string]config.Principal
 }
 
-func New(db *pgxpool.Pool, registry *provider.Registry, principals []config.Principal, network egress.NetworkConfig) *Engine {
+func New(db *pgxpool.Pool, registry *provider.Registry, principals []config.Principal, network egress.NetworkConfig, retention config.Retention) *Engine {
+	if retention == (config.Retention{}) {
+		retention = config.DefaultRetention()
+	}
+	consumers := make(map[string]config.Principal)
 	var workers []config.Principal
 	for _, p := range principals {
 		if p.Role == "worker" {
 			workers = append(workers, config.Principal{Name: p.Name, Namespaces: slices.Clone(p.Namespaces), Capabilities: slices.Clone(p.Capabilities), EgressProfiles: slices.Clone(p.EgressProfiles)})
+		} else {
+			consumers[p.Name] = config.Principal{Name: p.Name, Role: p.Role, Namespaces: slices.Clone(p.Namespaces), Capabilities: slices.Clone(p.Capabilities)}
 		}
 	}
-	return &Engine{Registry: registry, db: db, queries: q.New(db), workerPolicies: workers, network: network}
+	return &Engine{Registry: registry, db: db, queries: q.New(db), workerPolicies: workers, network: network, retention: retention, consumerPolicies: consumers}
 }
 
 func (e *Engine) Drain() {

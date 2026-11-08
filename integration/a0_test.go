@@ -94,16 +94,16 @@ func TestA0(t *testing.T) {
 	address := blocker.Addr().String()
 	writeConfig(t, configPath, address, "127.0.0.1", dbPort, password)
 	expectFailure(t, scratch, hostEnv, bin, "schema is unavailable or incompatible", "serve", "--local", "--config", configPath)
-	if got := native("migrate", "status", "--config", configPath); got != "1 pending\n2 pending" {
+	if got := native("migrate", "status", "--config", configPath); got != "1 pending\n2 pending\n3 pending" {
 		t.Fatalf("A0 upgrade status: %s", got)
 	}
 	if got := dbQuery("SELECT count(*) FROM pg_namespace WHERE nspname = 'harvest' UNION ALL SELECT count(*) FROM pg_tables WHERE schemaname = 'public'"); got != "0\n0" {
 		t.Fatalf("serve or status applied DDL: %q", got)
 	}
-	if got := native("migrate", "up", "--config", configPath); got != "Applied 2 Harvest migrations." {
+	if got := native("migrate", "up", "--config", configPath); got != "Applied 3 Harvest migrations." {
 		t.Fatalf("A0 upgrade: %s", got)
 	}
-	if got := native("migrate", "status", "--config", configPath); got != "1 applied\n2 applied" {
+	if got := native("migrate", "status", "--config", configPath); got != "1 applied\n2 applied\n3 applied" {
 		t.Fatalf("migration status: %s", got)
 	}
 	if got := native("migrate", "up", "--config", configPath); got != "Applied 0 Harvest migrations." {
@@ -112,7 +112,7 @@ func TestA0(t *testing.T) {
 	assertSchema := func() {
 		t.Helper()
 		got := dbQuery("SELECT tablename FROM pg_tables WHERE schemaname = 'harvest' ORDER BY tablename")
-		if got != "attempts\njobs\nquota_buckets\nquota_permits\nschedules\nsubmissions\ntargets\nworkers" {
+		if got != "attempts\nchange_events\nchange_heads\nconsumers\ncurrent_results\njobs\nobservations\nquota_buckets\nquota_permits\nschedules\nsubmissions\ntargets\nworkers" {
 			t.Fatalf("unexpected schema: %q", got)
 		}
 	}

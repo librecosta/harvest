@@ -25,6 +25,64 @@ type HarvestAttempt struct {
 	ReceiptState *string    `json:"receipt_state"`
 }
 
+type HarvestChangeEvent struct {
+	Stream         string     `json:"stream"`
+	Position       int64      `json:"position"`
+	ID             uuid.UUID  `json:"id"`
+	Action         string     `json:"action"`
+	TargetID       uuid.UUID  `json:"target_id"`
+	Capability     string     `json:"capability"`
+	OutputSchema   int32      `json:"output_schema"`
+	ScopeKey       string     `json:"scope_key"`
+	TombstoneScope []byte     `json:"tombstone_scope"`
+	ObservationID  *uuid.UUID `json:"observation_id"`
+	CommittedAt    time.Time  `json:"committed_at"`
+	StoredBytes    int32      `json:"stored_bytes"`
+}
+
+type HarvestChangeHead struct {
+	Stream          string     `json:"stream"`
+	Epoch           uuid.UUID  `json:"epoch"`
+	LastPosition    int64      `json:"last_position"`
+	MinPosition     int64      `json:"min_position"`
+	EventBytes      int64      `json:"event_bytes"`
+	TotalEventBytes int64      `json:"total_event_bytes"`
+	HistoryRows     int64      `json:"history_rows"`
+	HistoryBytes    int64      `json:"history_bytes"`
+	LastPrunedAt    time.Time  `json:"last_pruned_at"`
+	HistoryScanAt   *time.Time `json:"history_scan_at"`
+	HistoryScanID   *uuid.UUID `json:"history_scan_id"`
+}
+
+type HarvestConsumer struct {
+	ID            uuid.UUID  `json:"id"`
+	Stream        string     `json:"stream"`
+	Name          string     `json:"name"`
+	Principal     string     `json:"principal"`
+	Epoch         uuid.UUID  `json:"epoch"`
+	Policy        []byte     `json:"policy"`
+	AckPosition   int64      `json:"ack_position"`
+	LastActivity  time.Time  `json:"last_activity"`
+	ResetRequired bool       `json:"reset_required"`
+	ResetReason   string     `json:"reset_reason"`
+	ResetID       *uuid.UUID `json:"reset_id"`
+	ResetBase     int64      `json:"reset_base"`
+	ResetBytes    int64      `json:"reset_bytes"`
+	ResetDeadline *time.Time `json:"reset_deadline"`
+}
+
+type HarvestCurrentResult struct {
+	Stream        string    `json:"stream"`
+	TargetID      uuid.UUID `json:"target_id"`
+	Capability    string    `json:"capability"`
+	OutputSchema  int32     `json:"output_schema"`
+	ScopeKey      string    `json:"scope_key"`
+	ObservationID uuid.UUID `json:"observation_id"`
+	ContentHash   []byte    `json:"content_hash"`
+	Position      int64     `json:"position"`
+	ConfirmedAt   time.Time `json:"confirmed_at"`
+}
+
 type HarvestJob struct {
 	ID                uuid.UUID  `json:"id"`
 	TargetID          uuid.UUID  `json:"target_id"`
@@ -52,6 +110,27 @@ type HarvestJob struct {
 	AcceptedHash      []byte     `json:"accepted_hash"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
+}
+
+type HarvestObservation struct {
+	ID           uuid.UUID `json:"id"`
+	Stream       string    `json:"stream"`
+	TargetID     uuid.UUID `json:"target_id"`
+	Capability   string    `json:"capability"`
+	OutputSchema int32     `json:"output_schema"`
+	ScopeKey     string    `json:"scope_key"`
+	Scope        []byte    `json:"scope"`
+	State        string    `json:"state"`
+	ObservedAt   time.Time `json:"observed_at"`
+	ReceivedAt   time.Time `json:"received_at"`
+	Data         []byte    `json:"data"`
+	ContentHash  []byte    `json:"content_hash"`
+	Source       string    `json:"source"`
+	Evidence     string    `json:"evidence"`
+	Sample       bool      `json:"sample"`
+	JobID        uuid.UUID `json:"job_id"`
+	AttemptID    uuid.UUID `json:"attempt_id"`
+	StoredBytes  int32     `json:"stored_bytes"`
 }
 
 type HarvestQuotaBucket struct {
