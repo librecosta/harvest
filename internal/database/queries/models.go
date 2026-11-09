@@ -163,16 +163,19 @@ type HarvestQuotaBucket struct {
 }
 
 type HarvestQuotaPermit struct {
-	ID          uuid.UUID  `json:"id"`
-	AttemptID   uuid.UUID  `json:"attempt_id"`
-	OperationID uuid.UUID  `json:"operation_id"`
-	RequestHash []byte     `json:"request_hash"`
-	BucketKeys  []string   `json:"bucket_keys"`
-	AccountKey  string     `json:"account_key"`
-	MaxBytes    int64      `json:"max_bytes"`
-	ExpiresAt   time.Time  `json:"expires_at"`
-	FinishedAt  *time.Time `json:"finished_at"`
-	FinishHash  []byte     `json:"finish_hash"`
+	ID             uuid.UUID  `json:"id"`
+	AttemptID      uuid.UUID  `json:"attempt_id"`
+	OperationID    uuid.UUID  `json:"operation_id"`
+	RequestHash    []byte     `json:"request_hash"`
+	BucketKeys     []string   `json:"bucket_keys"`
+	AccountKey     string     `json:"account_key"`
+	MaxBytes       int64      `json:"max_bytes"`
+	ExpiresAt      time.Time  `json:"expires_at"`
+	FinishedAt     *time.Time `json:"finished_at"`
+	FinishHash     []byte     `json:"finish_hash"`
+	WebHop         *int16     `json:"web_hop"`
+	PreviousPermit *uuid.UUID `json:"previous_permit"`
+	RedirectDigest string     `json:"redirect_digest"`
 }
 
 type HarvestSchedule struct {

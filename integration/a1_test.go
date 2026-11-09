@@ -292,14 +292,14 @@ func testRegistryAndAuth(t *testing.T, p *testPlane) (uuid.UUID, uuid.UUID) {
 		for _, cap := range description.Capabilities {
 			if cap.Status == "executable" {
 				executable++
-				if cap.Capability != fixtureOffer.Capability {
+				if cap.Capability != fixtureOffer.Capability && description.Provider != "web" {
 					t.Fatal("unimplemented provider advertised execution")
 				}
 			}
 		}
 	}
-	if executable != 1 {
-		t.Fatal("fixture did not advertise its executable offer")
+	if executable != 4 {
+		t.Fatal("expected the fixture and three compiled Web offers")
 	}
 	steam := p.register("steam", "app", "000570", "public")
 	if p.register("steam", "app", "570", "public") != steam {

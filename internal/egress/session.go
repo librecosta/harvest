@@ -2,9 +2,12 @@ package egress
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"io"
 	"mime"
+	"net"
 	"net/http"
 	"slices"
 	"strconv"
@@ -27,6 +30,10 @@ type Intent struct {
 	Origin      int       `json:"origin"`
 	Method      string    `json:"method"`
 	MaxBytes    int64     `json:"max_bytes"`
+	TargetID    uuid.UUID `json:"target_id,omitzero"`
+	Destination string    `json:"destination,omitempty"`
+	RequestURI  string    `json:"request_uri,omitempty"`
+	Previous    uuid.UUID `json:"previous_permit,omitzero"`
 }
 
 type Grant struct {
@@ -41,6 +48,7 @@ type Usage struct {
 	Bytes           int64  `json:"bytes"`
 	LatencyMS       int64  `json:"latency_ms"`
 	ThrottleSeconds int32  `json:"throttle_seconds,omitempty"`
+	RedirectDigest  string `json:"redirect_digest,omitempty"`
 }
 
 type Gate interface {
@@ -56,6 +64,7 @@ type Session struct {
 	source                Source
 	namespace, capability string
 	gate                  Gate
+	target                WebDestination
 	client                http.Client
 	mu                    sync.Mutex
 	pinned                string
@@ -64,12 +73,41 @@ type Session struct {
 	closed                bool
 }
 
-func (p *Pool) Session(ctx context.Context, plan Plan, source Source, namespace, capability string, gate Gate) *Session {
+type WebDestination struct {
+	ID     uuid.UUID
+	Origin string
+}
+
+type responseContextKey struct{}
+type responseContext struct {
+	permit uuid.UUID
+	path   Path
+}
+
+func ResponsePath(response *http.Response) Path {
+	return responseRoute(response).path
+}
+
+func responseRoute(response *http.Response) responseContext {
+	if response != nil && response.Request != nil {
+		path, _ := response.Request.Context().Value(responseContextKey{}).(responseContext)
+		return path
+	}
+	return responseContext{}
+}
+
+func (p *Pool) Session(ctx context.Context, plan Plan, source Source, namespace, capability string, gate Gate, target ...WebDestination) *Session {
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Session{pool: p, ctx: ctx, cancel: cancel, plan: plan, source: source, namespace: namespace, capability: capability, gate: gate}
+	if len(target) == 1 {
+		s.target = target[0]
+	}
 	s.client = http.Client{
 		Transport: s,
 		CheckRedirect: func(r *http.Request, via []*http.Request) error {
+			if s.source.FixedPath != "" {
+				return http.ErrUseLastResponse
+			}
 			if len(via) >= 4 || s.source.Origin(r.URL) < 0 ||
 				(via[len(via)-1].URL.Scheme == "https" && r.URL.Scheme != "https") {
 				return ErrPolicy
@@ -97,16 +135,28 @@ func (c scopedClient) Do(r *http.Request) (*http.Response, error) {
 	if r == nil || r.URL == nil {
 		return nil, ErrPolicy
 	}
-	res, err := c.session.client.Do(r)
+	s := c.session
+	if s.source.WebMethod != "" {
+		if !s.source.WebTarget(s.target.Origin) || !s.source.webURL(r.URL, s.target.Origin) ||
+			r.Method != s.source.WebMethod || r.URL.RequestURI() != "/" || r.Response != nil {
+			return nil, ErrPolicy
+		}
+		return s.webDo(r)
+	}
+	res, err := s.client.Do(r)
 	if err == nil {
 		return res, nil
 	}
-	for _, safe := range []error{ErrPolicy, ErrBudget, ErrDeferred, ErrUnavailable, context.Canceled, context.DeadlineExceeded} {
+	return nil, safeError(err)
+}
+
+func safeError(err error) error {
+	for _, safe := range []error{ErrPolicy, ErrBudget, ErrDeferred, ErrUnavailable, ErrResponse, ErrTLSName, ErrTLSExpired, ErrTLSUntrusted, ErrTLSVerify, ErrProxy, context.Canceled, context.DeadlineExceeded} {
 		if errors.Is(err, safe) {
-			return nil, safe
+			return safe
 		}
 	}
-	return nil, ErrUnavailable
+	return ErrUnavailable
 }
 
 func (s *Session) Close() {
@@ -123,6 +173,12 @@ func (s *Session) RoundTrip(r *http.Request) (*http.Response, error) {
 		r.Method = http.MethodGet
 	}
 	origin := s.source.Origin(r.URL)
+	if s.source.WebMethod != "" && s.source.webURL(r.URL, s.target.Origin) && WebRequestURI(r.URL.RequestURI()) {
+		origin = 0
+	}
+	if s.source.FixedPath != "" && (r.URL.EscapedPath() != s.source.FixedPath || r.Method != http.MethodGet) {
+		origin = -1
+	}
 	if origin < 0 || (r.Method != http.MethodGet && r.Method != http.MethodHead) ||
 		(r.Host != "" && r.Host != r.URL.Host) || (r.Body != nil && r.Body != http.NoBody) ||
 		r.ContentLength != 0 || len(r.TransferEncoding) != 0 || len(r.Trailer) != 0 ||
@@ -134,7 +190,7 @@ func (s *Session) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 	headerBytes := 0
 	for k, values := range r.Header {
-		if !allowedHeader(k) {
+		if !allowedHeader(k) || (s.source.WebMethod != "" && !slices.Contains([]string{"accept", "accept-language", "user-agent"}, strings.ToLower(k))) {
 			return nil, ErrPolicy
 		}
 		for _, value := range values {
@@ -203,6 +259,14 @@ func (s *Session) send(ctx context.Context, r *http.Request, path reservation, o
 		OperationID: uuid.NewV7(), Profile: s.plan.Profile, PathID: path.path.ID, Origin: origin,
 		Method: r.Method, MaxBytes: s.source.MaxBodyBytes,
 	}
+	if s.source.WebMethod != "" {
+		intent.TargetID, intent.Destination, intent.RequestURI = s.target.ID, s.target.Origin, r.URL.RequestURI()
+		intent.Previous = responseRoute(r.Response).permit
+		if intent.Previous == (uuid.UUID{}) && intent.RequestURI != "/" {
+			s.pool.release(path, 0, nil, false)
+			return nil, ErrPolicy
+		}
+	}
 	grant, start, err := s.acquire(ctx, intent)
 	if err != nil || grant.RetryMS != 0 {
 		s.pool.release(path, 0, nil, false)
@@ -238,9 +302,37 @@ func (s *Session) send(ctx context.Context, r *http.Request, path reservation, o
 	request.GetBody = nil
 	res, err := path.transport.RoundTrip(request)
 	if err != nil {
+		wireErr := wire.Err()
 		finish(Usage{Outcome: "transport"}, err, false)
 		if wireErr := ctx.Err(); wireErr != nil {
 			return nil, wireErr
+		}
+		if s.source.WebMethod != "" {
+			var verify *tls.CertificateVerificationError
+			if errors.As(err, &verify) {
+				var invalid x509.CertificateInvalidError
+				var hostname x509.HostnameError
+				var authority x509.UnknownAuthorityError
+				switch {
+				case errors.As(verify.Err, &hostname):
+					return nil, ErrTLSName
+				case errors.As(verify.Err, &invalid) && invalid.Reason == x509.Expired:
+					return nil, ErrTLSExpired
+				case errors.As(verify.Err, &authority):
+					return nil, ErrTLSUntrusted
+				default:
+					return nil, ErrTLSVerify
+				}
+			}
+			if errors.Is(err, ErrProxy) {
+				return nil, ErrProxy
+			}
+		}
+		if s.source.WebMethod != "" || s.source.FixedPath != "" {
+			var timeout net.Error
+			if errors.Is(wireErr, context.DeadlineExceeded) || (errors.As(err, &timeout) && timeout.Timeout()) {
+				return nil, context.DeadlineExceeded
+			}
 		}
 		if errors.Is(err, errConnect) || errors.Is(err, ErrPolicy) {
 			return nil, err
@@ -254,6 +346,13 @@ func (s *Session) send(ctx context.Context, r *http.Request, path reservation, o
 		}
 	}
 	outcome := classify(res.StatusCode)
+	res.Request = r.WithContext(context.WithValue(r.Context(), responseContextKey{}, responseContext{grant.ID, path.path.Path()}))
+	var redirect string
+	if s.source.WebMethod != "" && redirectStatus(res.StatusCode) {
+		if location, err := res.Location(); err == nil && s.webRedirect(location) {
+			redirect = RedirectDigest(location.RequestURI())
+		}
+	}
 	if outcome == "throttled" || outcome == "denied" {
 		_ = res.Body.Close()
 		usage := Usage{Outcome: outcome}
@@ -262,18 +361,21 @@ func (s *Session) send(ctx context.Context, r *http.Request, path reservation, o
 		}
 		finish(usage, nil, true)
 		cleanup()
-		res.Body, res.ContentLength, res.Request = http.NoBody, 0, r
+		res.Body, res.ContentLength = http.NoBody, 0
 		return res, nil
 	}
 	kind, _, _ := mime.ParseMediaType(res.Header.Get("Content-Type"))
-	if res.StatusCode < 200 || res.ContentLength > s.source.MaxBodyBytes ||
+	if s.source.WebMethod == "" && (res.StatusCode < 200 || res.ContentLength > s.source.MaxBodyBytes ||
 		(res.StatusCode >= 200 && res.StatusCode < 300 && res.StatusCode != 204 && r.Method != http.MethodHead &&
-			!slices.Contains(s.source.ContentTypes, kind)) || res.Header.Get("Content-Encoding") != "" {
+			!slices.Contains(s.source.ContentTypes, kind)) || res.Header.Get("Content-Encoding") != "") {
 		res.Body.Close()
 		if outcome == "success" {
 			outcome = "policy"
 		}
 		finish(Usage{Outcome: outcome}, nil, true)
+		if s.source.FixedPath != "" {
+			return nil, ErrResponse
+		}
 		return nil, ErrPolicy
 	}
 	s.calls.Add(1)
@@ -282,13 +384,15 @@ func (s *Session) send(ctx context.Context, r *http.Request, path reservation, o
 		finish: func(usage Usage) {
 			defer s.calls.Done()
 			defer cleanup()
+			if usage.Outcome == "success" {
+				usage.RedirectDigest = redirect
+			}
 			finish(usage, nil, true)
 		},
 	}
 	context.AfterFunc(wire, body.timeout)
 	res.Body = body
 	// The returned response must not expose the private transport request.
-	res.Request = r
 	return res, nil
 }
 

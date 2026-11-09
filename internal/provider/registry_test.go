@@ -34,8 +34,8 @@ func TestBuiltinIdentityAndDiscovery(t *testing.T) {
 	}
 	for _, p := range r.Describe() {
 		for _, c := range p.Capabilities {
-			if c.Status != "not_implemented" {
-				t.Fatalf("%s claims to collect in A1", c.Capability)
+			if (p.Provider == "web") != (c.Status == "executable") {
+				t.Fatalf("unexpected capability status for %s: %s", c.Capability, c.Status)
 			}
 		}
 	}

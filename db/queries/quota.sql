@@ -41,8 +41,15 @@ WHERE key = ANY(sqlc.arg(keys)::text[]) AND cooldown_until > statement_timestamp
 UPDATE harvest.quota_buckets SET deferred = deferred + 1 WHERE key = ANY(sqlc.arg(keys)::text[]);
 
 -- name: InsertQuotaPermit :exec
-INSERT INTO harvest.quota_permits (id, attempt_id, operation_id, request_hash, bucket_keys, account_key, max_bytes, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+INSERT INTO harvest.quota_permits (id, attempt_id, operation_id, request_hash, bucket_keys, account_key, max_bytes, expires_at, web_hop, previous_permit)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, sqlc.narg(web_hop), sqlc.narg(previous_permit));
+
+-- name: WebRedirectHop :one
+SELECT (parent.web_hop + 1)::smallint AS hop FROM harvest.quota_permits parent
+WHERE parent.id = sqlc.arg(parent_id) AND parent.attempt_id = sqlc.arg(attempt_id)
+    AND parent.finished_at IS NOT NULL AND parent.redirect_digest = sqlc.arg(digest)
+    AND parent.web_hop < 3
+    AND NOT EXISTS (SELECT 1 FROM harvest.quota_permits child WHERE child.previous_permit = parent.id);
 
 -- name: LockQuotaPermitForFinish :one
 SELECT p.* FROM harvest.quota_permits p
@@ -53,7 +60,7 @@ WHERE p.id = sqlc.arg(permit_id) AND w.id = sqlc.arg(worker_id) AND w.principal 
 FOR UPDATE OF p;
 
 -- name: FinishQuotaPermit :exec
-UPDATE harvest.quota_permits SET finished_at = sqlc.arg(now_at)::timestamptz, finish_hash = $2 WHERE id = $1;
+UPDATE harvest.quota_permits SET finished_at = sqlc.arg(now_at)::timestamptz, finish_hash = $2, redirect_digest = $3 WHERE id = $1;
 
 -- name: RecordQuotaOutcome :exec
 UPDATE harvest.quota_buckets SET succeeded = succeeded + sqlc.arg(success_count)::bigint,

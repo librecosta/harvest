@@ -57,22 +57,32 @@ type Plan struct {
 func Mode(s string) bool      { return s == Direct || s == PreferProxy || s == RequireProxy }
 func ProxyKind(s string) bool { return s == "http" || s == "https" || s == "socks5" }
 
-// Source permits only fixed, compiled origins. Fixture is set only by the
-// integration test registry. Configuration cannot enable loopback source traffic.
+// Source is fixed to compiled origins or the canonical Web Target.
+// Fixture is set only by the integration test registry.
 type Source struct {
-	Origins       []string
-	AllowDirect   bool
-	RequireRegion bool
-	Replay        bool
-	MaxRequests   int32
-	MaxBodyBytes  int64
-	ContentTypes  []string
-	Fixture       bool
+	Origins        []string
+	WebMethod      string // GET for homepage or HEAD for HTTPS certificate evidence.
+	FixedPath      string // Exact fixed-source path. Redirects are disabled.
+	FixtureNetwork *FixtureNetwork
+	AllowDirect    bool
+	RequireRegion  bool
+	Replay         bool
+	MaxRequests    int32
+	MaxBodyBytes   int64
+	ContentTypes   []string
+	Fixture        bool
 }
 
 func (s Source) Valid() bool {
-	if len(s.Origins) < 1 || len(s.Origins) > 8 || s.MaxRequests < 1 || s.MaxRequests > 32 ||
+	if len(s.Origins) > 8 || s.MaxRequests < 1 || s.MaxRequests > 32 ||
 		s.MaxBodyBytes < 1 || s.MaxBodyBytes > 2<<20 || len(s.ContentTypes) < 1 || len(s.ContentTypes) > 8 {
+		return false
+	}
+	if s.WebMethod != "" {
+		return len(s.Origins) == 0 && s.FixedPath == "" && !s.Fixture && !s.Replay &&
+			(s.WebMethod == "GET" || s.WebMethod == "HEAD")
+	}
+	if len(s.Origins) == 0 || (s.FixedPath != "" && !WebRequestURI(s.FixedPath)) {
 		return false
 	}
 	for i, origin := range s.Origins {

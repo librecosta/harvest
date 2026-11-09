@@ -126,34 +126,42 @@ func (q *Queries) EnsureQuotaBuckets(ctx context.Context, keys []string) error {
 }
 
 const finishQuotaPermit = `-- name: FinishQuotaPermit :exec
-UPDATE harvest.quota_permits SET finished_at = $3::timestamptz, finish_hash = $2 WHERE id = $1
+UPDATE harvest.quota_permits SET finished_at = $4::timestamptz, finish_hash = $2, redirect_digest = $3 WHERE id = $1
 `
 
 type FinishQuotaPermitParams struct {
-	ID         uuid.UUID `json:"id"`
-	FinishHash []byte    `json:"finish_hash"`
-	NowAt      time.Time `json:"now_at"`
+	ID             uuid.UUID `json:"id"`
+	FinishHash     []byte    `json:"finish_hash"`
+	RedirectDigest string    `json:"redirect_digest"`
+	NowAt          time.Time `json:"now_at"`
 }
 
 func (q *Queries) FinishQuotaPermit(ctx context.Context, arg FinishQuotaPermitParams) error {
-	_, err := q.db.Exec(ctx, finishQuotaPermit, arg.ID, arg.FinishHash, arg.NowAt)
+	_, err := q.db.Exec(ctx, finishQuotaPermit,
+		arg.ID,
+		arg.FinishHash,
+		arg.RedirectDigest,
+		arg.NowAt,
+	)
 	return err
 }
 
 const insertQuotaPermit = `-- name: InsertQuotaPermit :exec
-INSERT INTO harvest.quota_permits (id, attempt_id, operation_id, request_hash, bucket_keys, account_key, max_bytes, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO harvest.quota_permits (id, attempt_id, operation_id, request_hash, bucket_keys, account_key, max_bytes, expires_at, web_hop, previous_permit)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 `
 
 type InsertQuotaPermitParams struct {
-	ID          uuid.UUID `json:"id"`
-	AttemptID   uuid.UUID `json:"attempt_id"`
-	OperationID uuid.UUID `json:"operation_id"`
-	RequestHash []byte    `json:"request_hash"`
-	BucketKeys  []string  `json:"bucket_keys"`
-	AccountKey  string    `json:"account_key"`
-	MaxBytes    int64     `json:"max_bytes"`
-	ExpiresAt   time.Time `json:"expires_at"`
+	ID             uuid.UUID  `json:"id"`
+	AttemptID      uuid.UUID  `json:"attempt_id"`
+	OperationID    uuid.UUID  `json:"operation_id"`
+	RequestHash    []byte     `json:"request_hash"`
+	BucketKeys     []string   `json:"bucket_keys"`
+	AccountKey     string     `json:"account_key"`
+	MaxBytes       int64      `json:"max_bytes"`
+	ExpiresAt      time.Time  `json:"expires_at"`
+	WebHop         *int16     `json:"web_hop"`
+	PreviousPermit *uuid.UUID `json:"previous_permit"`
 }
 
 func (q *Queries) InsertQuotaPermit(ctx context.Context, arg InsertQuotaPermitParams) error {
@@ -166,6 +174,8 @@ func (q *Queries) InsertQuotaPermit(ctx context.Context, arg InsertQuotaPermitPa
 		arg.AccountKey,
 		arg.MaxBytes,
 		arg.ExpiresAt,
+		arg.WebHop,
+		arg.PreviousPermit,
 	)
 	return err
 }
@@ -211,7 +221,7 @@ func (q *Queries) LockQuotaBuckets(ctx context.Context, keys []string) ([]Harves
 }
 
 const lockQuotaPermitForFinish = `-- name: LockQuotaPermitForFinish :one
-SELECT p.id, p.attempt_id, p.operation_id, p.request_hash, p.bucket_keys, p.account_key, p.max_bytes, p.expires_at, p.finished_at, p.finish_hash FROM harvest.quota_permits p
+SELECT p.id, p.attempt_id, p.operation_id, p.request_hash, p.bucket_keys, p.account_key, p.max_bytes, p.expires_at, p.finished_at, p.finish_hash, p.web_hop, p.previous_permit, p.redirect_digest FROM harvest.quota_permits p
 JOIN harvest.attempts a ON a.id = p.attempt_id
 JOIN harvest.workers w ON w.id = a.worker_id
 WHERE p.id = $1 AND w.id = $2 AND w.principal = $3
@@ -249,6 +259,9 @@ func (q *Queries) LockQuotaPermitForFinish(ctx context.Context, arg LockQuotaPer
 		&i.ExpiresAt,
 		&i.FinishedAt,
 		&i.FinishHash,
+		&i.WebHop,
+		&i.PreviousPermit,
+		&i.RedirectDigest,
 	)
 	return i, err
 }
@@ -293,7 +306,7 @@ func (q *Queries) QuotaPermitCount(ctx context.Context, keys []string) (int64, e
 }
 
 const quotaPermitReplay = `-- name: QuotaPermitReplay :one
-SELECT id, attempt_id, operation_id, request_hash, bucket_keys, account_key, max_bytes, expires_at, finished_at, finish_hash FROM harvest.quota_permits WHERE attempt_id = $1 AND operation_id = $2
+SELECT id, attempt_id, operation_id, request_hash, bucket_keys, account_key, max_bytes, expires_at, finished_at, finish_hash, web_hop, previous_permit, redirect_digest FROM harvest.quota_permits WHERE attempt_id = $1 AND operation_id = $2
 `
 
 type QuotaPermitReplayParams struct {
@@ -315,6 +328,9 @@ func (q *Queries) QuotaPermitReplay(ctx context.Context, arg QuotaPermitReplayPa
 		&i.ExpiresAt,
 		&i.FinishedAt,
 		&i.FinishHash,
+		&i.WebHop,
+		&i.PreviousPermit,
+		&i.RedirectDigest,
 	)
 	return i, err
 }
@@ -426,4 +442,25 @@ type ResetQuotaMetricsParams struct {
 func (q *Queries) ResetQuotaMetrics(ctx context.Context, arg ResetQuotaMetricsParams) error {
 	_, err := q.db.Exec(ctx, resetQuotaMetrics, arg.WindowStart, arg.Keys)
 	return err
+}
+
+const webRedirectHop = `-- name: WebRedirectHop :one
+SELECT (parent.web_hop + 1)::smallint AS hop FROM harvest.quota_permits parent
+WHERE parent.id = $1 AND parent.attempt_id = $2
+    AND parent.finished_at IS NOT NULL AND parent.redirect_digest = $3
+    AND parent.web_hop < 3
+    AND NOT EXISTS (SELECT 1 FROM harvest.quota_permits child WHERE child.previous_permit = parent.id)
+`
+
+type WebRedirectHopParams struct {
+	ParentID  uuid.UUID `json:"parent_id"`
+	AttemptID uuid.UUID `json:"attempt_id"`
+	Digest    string    `json:"digest"`
+}
+
+func (q *Queries) WebRedirectHop(ctx context.Context, arg WebRedirectHopParams) (int16, error) {
+	row := q.db.QueryRow(ctx, webRedirectHop, arg.ParentID, arg.AttemptID, arg.Digest)
+	var hop int16
+	err := row.Scan(&hop)
+	return hop, err
 }

@@ -30,12 +30,12 @@ database:
 #     role: "worker"
 #     token: "REPLACE_WITH_A_DISTINCT_GENERATED_TOKEN"
 #     namespaces: ["public"]
-#     capabilities: ["source.http"]
+#     capabilities: ["web.http"]
 #     egress_profiles: ["regional"]
 #     max_slots: 2
 
-# One-time policy:init input for a compiled HTTP capability.
-# Substitute its actual ID and grant the profile to an eligible Worker.
+# One-time policy:init input for Web homepage acquisition.
+# Grant the matching profile to an eligible Worker.
 # PostgreSQL owns the active policy after initialization. Serve ignores this block.
 # network:
 #   global_bucket: "cluster"
@@ -48,13 +48,13 @@ database:
 #           region: "cn"
 #           bucket: "egress_cn"
 #   sources:
-#     - capability: "source.http"
+#     - capability: "web.http"
 #       namespace: "public"
 #       profile: "regional"
-#       provider_bucket: "source_http"
-#       account_bucket: "source_public"
+#       provider_bucket: "web_provider"
+#       account_bucket: "web_public"
 #   quotas:
 #     - {id: "cluster", burst: 16, per_minute: 120, concurrency: 4}
-#     - {id: "source_http", burst: 8, per_minute: 60, concurrency: 2}
-#     - {id: "source_public", burst: 4, per_minute: 30, concurrency: 2}
+#     - {id: "web_provider", burst: 8, per_minute: 60, concurrency: 2}
+#     - {id: "web_public", burst: 4, per_minute: 30, concurrency: 2}
 #     - {id: "egress_cn", burst: 4, per_minute: 30, concurrency: 2}

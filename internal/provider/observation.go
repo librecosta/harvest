@@ -4,6 +4,7 @@ import (
 	"encoding/json/jsontext"
 	json "encoding/json/v2"
 	"errors"
+	"slices"
 	"time"
 )
 
@@ -33,18 +34,21 @@ type Segment struct {
 // ObservationPolicy is part of a compiled capability version. Scopes derives
 // the exact expected semantic coverage from the immutable Task.
 type ObservationPolicy struct {
-	Scopes           func(Task) []SegmentScope
-	NormalizeData    func(state string, data jsontext.Value) (jsontext.Value, error)
-	Source           string
-	EmptyEvidence    string
-	WithdrawEvidence string
-	MaxDataBytes     int
-	Sample           bool
+	Scopes        func(Task) []SegmentScope
+	NormalizeData func(state string, data jsontext.Value) (jsontext.Value, error)
+	// NormalizeScopedData returns the persisted data and its semantic projection.
+	NormalizeScopedData func(Task, SegmentScope, string, jsontext.Value) (data, semantic jsontext.Value, err error)
+	DiagnosticEvidence  []string
+	Source              string
+	EmptyEvidence       string
+	WithdrawEvidence    string
+	MaxDataBytes        int
+	Sample              bool
 }
 
 func (p *ObservationPolicy) valid() bool {
-	return p.Scopes != nil && p.NormalizeData != nil && Identifier(p.Source) && p.MaxDataBytes > 0 &&
-		p.MaxDataBytes <= MaxSegmentData && (p.EmptyEvidence == "" || Identifier(p.EmptyEvidence)) &&
+	return p.Scopes != nil && (p.NormalizeData != nil || p.NormalizeScopedData != nil) && Identifier(p.Source) && p.MaxDataBytes > 0 &&
+		!slices.ContainsFunc(p.DiagnosticEvidence, func(code string) bool { return !Identifier(code) }) && p.MaxDataBytes <= MaxSegmentData && (p.EmptyEvidence == "" || Identifier(p.EmptyEvidence)) &&
 		(p.WithdrawEvidence == "" || !p.Sample && Identifier(p.WithdrawEvidence) && p.WithdrawEvidence != p.EmptyEvidence)
 }
 

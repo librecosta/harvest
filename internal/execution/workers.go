@@ -340,7 +340,10 @@ func normalizeResult(cap provider.Capability, result provider.Result) (provider.
 			retryable = true
 		case "invalid_payload", "policy_denied", "upstream_auth", "upstream_throttled", "incomplete":
 		default:
-			return result, false, ErrInvalid
+			if cap.Observation == nil || !slices.Contains(cap.Observation.DiagnosticEvidence, result.Code) {
+				return result, false, ErrInvalid
+			}
+			retryable = result.Code == "resolver_unavailable" || result.Code == "resolver_servfail" || result.Code == "proxy_unavailable"
 		}
 	case "cancelled":
 		if result.Code != "cancelled" {

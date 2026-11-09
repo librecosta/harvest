@@ -15,6 +15,10 @@ endpoint health and the scoped HTTP client. Each source round trip acquires
 an Attempt-fenced permit before dialing. `internal/execution` derives quota
 buckets from the active PostgreSQL policy, stored Job, compiled capability
 and authorized Worker path. The Worker releases a permit after closing the body.
+For Web, the control plane also binds the destination to the stored Target.
+Each same-origin redirect redeems one finished permit's destination digest.
+The Web Provider parses bounded HTTP/TLS evidence and sends typed DNS
+questions to a fixed DoH resolver through the same network boundary.
 
 `internal/execution` also owns scoped Observation acceptance, last-known-good,
 change-stream cursors and retention. It commits acquisition results under the
@@ -47,3 +51,5 @@ the checkout. The request cancels the same context used for OS signals.
 - [A3 acceptance and recovery](../docs/harvest-v0.1-a3-acceptance.md)
 - [A4 implementation scope](../docs/harvest-v0.1-a4-operational-policy-persistence.md)
 - [A4 acceptance](../docs/harvest-v0.1-a4-acceptance.md)
+- [B1 implementation scope](../docs/harvest-v0.1-b1-core-web-acquisition.md)
+- [B1 acceptance](../docs/harvest-v0.1-b1-acceptance.md)

@@ -24,15 +24,7 @@ func Builtins() []Manifest {
 				metadata("steam.players", "app", Normalize[struct{}]),
 			},
 		},
-		{
-			Name:      "web",
-			Resources: []Resource{{"domain", domain}, {"origin", origin}},
-			Capabilities: []Capability{
-				metadata("web.dns", "domain", Normalize[struct{}]),
-				metadata("web.http", "origin", Normalize[struct{}]),
-				metadata("web.tls", "origin", Normalize[struct{}]),
-			},
-		},
+		WebManifest(nil),
 	}
 }
 

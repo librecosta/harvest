@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json/jsontext"
 	json "encoding/json/v2"
 	"errors"
 	"slices"
@@ -97,23 +98,33 @@ func normalizeSegments(cap provider.Capability, task provider.Task, result *prov
 					return nil, ErrInvalid
 				}
 			}
-			s.Data, err = policy.NormalizeData(s.State, s.Data)
+			var semantic jsontext.Value
+			if policy.NormalizeScopedData != nil {
+				s.Data, semantic, err = policy.NormalizeScopedData(task, s.Scope, s.State, s.Data)
+			} else {
+				s.Data, err = policy.NormalizeData(s.State, s.Data)
+				semantic = s.Data
+			}
 			if err != nil || !s.Data.IsValid() || bytes.Equal(s.Data, []byte("null")) {
 				return nil, ErrInvalid
 			}
-			if len(s.Data) > policy.MaxDataBytes {
+			if len(s.Data) > policy.MaxDataBytes || len(semantic) > policy.MaxDataBytes {
 				return nil, ErrTooLarge
+			}
+			if !semantic.IsValid() {
+				return nil, ErrInvalid
 			}
 			s.hash, err = hashValue(struct {
 				State string
 				Data  any
-			}{s.State, s.Data})
+			}{s.State, semantic})
 			if err != nil {
 				return nil, ErrInvalid
 			}
 			valid++
 		case "not_modified", "unavailable", "invalid", "not_covered":
-			if len(s.Data) != 0 || s.Evidence != "" || s.Withdraw {
+			if len(s.Data) != 0 || s.Withdraw || (s.Evidence != "" &&
+				((s.State != "unavailable" && s.State != "invalid") || !slices.Contains(policy.DiagnosticEvidence, s.Evidence))) {
 				return nil, ErrInvalid
 			}
 			if s.State == "not_modified" {

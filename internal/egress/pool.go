@@ -25,6 +25,7 @@ type endpoint struct {
 type transportKey struct {
 	endpoint, profile, namespace, capability string
 	fixture                                  bool
+	network                                  *FixtureNetwork
 }
 
 type cachedTransport struct {
@@ -211,7 +212,7 @@ func (p *Pool) reserve(plan Plan, source Source, namespace, capability, pinned s
 		}
 		path = *direct
 	}
-	key := transportKey{path.ID, plan.Profile, namespace, capability, source.Fixture}
+	key := transportKey{path.ID, plan.Profile, namespace, capability, source.Fixture, source.FixtureNetwork}
 	entry, ok := p.transports[key]
 	if !ok {
 		if len(p.transports) >= 256 {
@@ -221,7 +222,7 @@ func (p *Pool) reserve(plan Plan, source Source, namespace, capability, pinned s
 		if selected != nil {
 			target = selected.url
 		}
-		entry.transport = routeTransport(target, source.Fixture)
+		entry.transport = routeTransport(target, source.Fixture, source.FixtureNetwork)
 	}
 	entry.used = now
 	p.transports[key] = entry

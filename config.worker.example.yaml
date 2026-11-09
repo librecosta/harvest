@@ -1,14 +1,14 @@
 # Copy to config.worker.yaml and set its filesystem permissions.
-# Replace the illustrative offer with an executable compiled capability.
+# Match the offer and egress profile to the server's Worker grant and policy.
 control_url: "http://127.0.0.1:8080"
 token: "REPLACE_WITH_THE_WORKER_SERVICE_TOKEN"
 concurrency: 2
 
 offers:
-  - capability: "source.http"
+  - capability: "web.http"
     request_schema: 1
     output_schema: 1
-    implementation: "source_v1"
+    implementation: "web_v1"
 
 egress:
   profiles:

@@ -30,6 +30,9 @@ func checkedAddress(ctx context.Context, lookup lookupIP, address string, fixtur
 	if err != nil {
 		return "", ErrPolicy
 	}
+	if _, err := netip.ParseAddr(host); err != nil {
+		host += "." // Avoid search-suffix DNS resolution.
+	}
 	addresses, err := lookup(ctx, "ip", host)
 	if err != nil || len(addresses) == 0 {
 		return "", ErrUnavailable
@@ -44,16 +47,35 @@ func checkedAddress(ctx context.Context, lookup lookupIP, address string, fixtur
 	return net.JoinHostPort(addresses[0].Unmap().String(), port), nil
 }
 
-func connect(ctx context.Context, destination string, endpoint *url.URL, fixture bool) (net.Conn, error) {
+// FixtureNetwork is injected by the test registry, never from YAML. Address
+// validation still runs before its dial function or any proxy tunnel.
+type FixtureNetwork struct {
+	Lookup     func(context.Context, string, string) ([]netip.Addr, error)
+	DialDirect func(context.Context, string, string) (net.Conn, error)
+	RootCAs    *x509.CertPool
+}
+
+func connect(ctx context.Context, destination string, endpoint *url.URL, fixture bool, options *FixtureNetwork) (net.Conn, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	dialer := &net.Dialer{Timeout: 2 * time.Second, KeepAlive: 20 * time.Second}
-	address, err := checkedAddress(ctx, net.DefaultResolver.LookupNetIP, destination, fixture)
+	lookup, dialDirect := net.DefaultResolver.LookupNetIP, dialer.DialContext
+	var roots *x509.CertPool
+	if options != nil {
+		roots = options.RootCAs
+		if options.Lookup != nil {
+			lookup = options.Lookup
+		}
+		if options.DialDirect != nil {
+			dialDirect = options.DialDirect
+		}
+	}
+	address, err := checkedAddress(ctx, lookup, destination, fixture)
 	if err != nil {
 		return nil, err
 	}
 	if endpoint == nil {
-		conn, err := dialer.DialContext(ctx, "tcp", address)
+		conn, err := dialDirect(ctx, "tcp", address)
 		if err != nil {
 			return nil, errConnect
 		}
@@ -75,13 +97,17 @@ func connect(ctx context.Context, destination string, endpoint *url.URL, fixture
 			// dial or an incomplete handshake, never a reported policy reply.
 			var op *net.OpError
 			if errors.As(err, &op) && (isDialError(op) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || op.Timeout()) {
-				return nil, errConnect
+				return nil, errors.Join(ErrProxy, errConnect)
 			}
-			return nil, errProxyRefused
+			return nil, errors.Join(ErrProxy, errProxyRefused)
 		}
 		return conn, nil
 	}
-	return connectTunnel(ctx, dialer, endpoint, address, nil)
+	conn, err := connectTunnel(ctx, dialer, endpoint, address, roots)
+	if err != nil {
+		return nil, errors.Join(ErrProxy, err)
+	}
+	return conn, nil
 }
 
 func isDialError(err error) bool {
@@ -164,7 +190,15 @@ func connectTunnel(ctx context.Context, dialer *net.Dialer, endpoint *url.URL, a
 
 const responseHeaderLimit = 16 << 10
 
-func routeTransport(endpoint *url.URL, fixture bool) *http.Transport {
+func routeTransport(endpoint *url.URL, fixture bool, options ...*FixtureNetwork) *http.Transport {
+	var network *FixtureNetwork
+	var roots *x509.CertPool
+	if len(options) != 0 {
+		network = options[0]
+		if network != nil {
+			roots = network.RootCAs
+		}
+	}
 	// HTTP/1 permits a single accounted request without implicit HTTP/2
 	// stream replay. The guarded transport also disables HTTP/1 replay.
 	protocols := new(http.Protocols)
@@ -172,9 +206,9 @@ func routeTransport(endpoint *url.URL, fixture bool) *http.Transport {
 	return &http.Transport{
 		Protocols: protocols,
 		DialContext: func(ctx context.Context, _, address string) (net.Conn, error) {
-			return connect(ctx, address, endpoint, fixture)
+			return connect(ctx, address, endpoint, fixture, network)
 		},
-		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots},
 		MaxIdleConns:    4, MaxIdleConnsPerHost: 2, MaxConnsPerHost: 16,
 		IdleConnTimeout: 30 * time.Second, TLSHandshakeTimeout: 2 * time.Second,
 		ResponseHeaderTimeout: 3 * time.Second, MaxResponseHeaderBytes: responseHeaderLimit,

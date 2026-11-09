@@ -3,6 +3,7 @@ package execution
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	json "encoding/json/v2"
 	"errors"
 	"net/http"
@@ -80,7 +81,44 @@ func (e *Engine) Permit(ctx context.Context, p config.Principal, id uuid.UUID, i
 		if replay && !bytes.Equal(old.RequestHash, hash) {
 			return egress.Grant{}, ErrConflict
 		}
-		if in.Origin >= len(cap.Network.Origins) || in.MaxBytes != cap.Network.MaxBodyBytes {
+		var hop *int16
+		if cap.Network.WebMethod != "" {
+			target, err := db.Target(ctx, q.TargetParams{ID: job.TargetID, Namespaces: []string{job.Namespace}})
+			if err != nil {
+				return egress.Grant{}, err
+			}
+			if in.Origin != 0 || in.TargetID != target.ID || in.Destination != target.ExternalKey ||
+				target.Provider != "web" || target.ResourceType != cap.Resource || target.State != "active" ||
+				in.Method != cap.Network.WebMethod || !cap.Network.WebTarget(target.ExternalKey) ||
+				!egress.WebRequestURI(in.RequestURI) {
+				return egress.Grant{}, ErrForbidden
+			}
+			switch {
+			case in.Previous == (uuid.UUID{}):
+				if in.RequestURI != "/" {
+					return egress.Grant{}, ErrForbidden
+				}
+				hop = new(int16)
+			case in.Method != http.MethodGet || !UUIDv7(in.Previous):
+				return egress.Grant{}, ErrForbidden
+			case !replay:
+				n, err := db.WebRedirectHop(ctx, q.WebRedirectHopParams{
+					ParentID: in.Previous, AttemptID: id, Digest: egress.RedirectDigest(in.RequestURI),
+				})
+				if errors.Is(err, pgx.ErrNoRows) {
+					return egress.Grant{}, ErrForbidden
+				}
+				if err != nil {
+					return egress.Grant{}, err
+				}
+				hop = &n
+			}
+		} else if in.Origin >= len(cap.Network.Origins) || in.TargetID != (uuid.UUID{}) ||
+			in.Previous != (uuid.UUID{}) || in.Destination != "" || in.RequestURI != "" ||
+			cap.Network.FixedPath != "" && in.Method != http.MethodGet {
+			return egress.Grant{}, ErrForbidden
+		}
+		if in.MaxBytes != cap.Network.MaxBodyBytes {
 			return egress.Grant{}, ErrForbidden
 		}
 		var scope provider.Scope
@@ -114,6 +152,9 @@ func (e *Engine) Permit(ctx context.Context, p config.Principal, id uuid.UUID, i
 		used, err := db.CountAttemptPermits(ctx, id)
 		if err != nil {
 			return egress.Grant{}, err
+		}
+		if hop != nil && *hop == 0 && used != 0 {
+			return egress.Grant{}, ErrForbidden
 		}
 		if used >= int64(cap.Network.MaxRequests) {
 			return egress.Grant{}, ErrQuotaBudget
@@ -149,9 +190,14 @@ func (e *Engine) Permit(ctx context.Context, p config.Principal, id uuid.UUID, i
 			return egress.Grant{}, err
 		}
 		permit := uuid.NewV7()
+		var parent *uuid.UUID
+		if in.Previous != (uuid.UUID{}) {
+			parent = &in.Previous
+		}
 		err = db.InsertQuotaPermit(ctx, q.InsertQuotaPermitParams{
 			ID: permit, AttemptID: id, OperationID: in.OperationID, RequestHash: hash,
 			BucketKeys: keys, AccountKey: rule.AccountBucket, MaxBytes: in.MaxBytes, ExpiresAt: expires,
+			WebHop: hop, PreviousPermit: parent,
 		})
 		return egress.Grant{ID: permit, ExpiresAt: expires.UTC(), LeaseMS: expires.Sub(now).Milliseconds()}, err
 	})
@@ -195,6 +241,12 @@ func (e *Engine) FinishPermit(ctx context.Context, p config.Principal, id uuid.U
 		in.ThrottleSeconds < 0 || in.ThrottleSeconds > 300 || (in.Outcome != "throttled" && in.ThrottleSeconds != 0) {
 		return ErrInvalid
 	}
+	if in.RedirectDigest != "" {
+		b, err := hex.DecodeString(in.RedirectDigest)
+		if in.Outcome != "success" || err != nil || len(b) != 32 || hex.EncodeToString(b) != in.RedirectDigest {
+			return ErrInvalid
+		}
+	}
 	var success, refusal, failure int64
 	var cooldown time.Duration
 	switch in.Outcome {
@@ -227,7 +279,7 @@ func (e *Engine) FinishPermit(ctx context.Context, p config.Principal, id uuid.U
 			}
 			return zero, nil
 		}
-		if in.Bytes > row.MaxBytes {
+		if in.Bytes > row.MaxBytes || (in.RedirectDigest != "" && row.WebHop == nil) {
 			return zero, ErrInvalid
 		}
 		buckets, err := db.LockQuotaBuckets(ctx, row.BucketKeys)
@@ -251,7 +303,7 @@ func (e *Engine) FinishPermit(ctx context.Context, p config.Principal, id uuid.U
 		}); err != nil {
 			return zero, err
 		}
-		return zero, db.FinishQuotaPermit(ctx, q.FinishQuotaPermitParams{ID: id, FinishHash: hash, NowAt: now})
+		return zero, db.FinishQuotaPermit(ctx, q.FinishQuotaPermitParams{ID: id, FinishHash: hash, NowAt: now, RedirectDigest: in.RedirectDigest})
 	})
 	return err
 }

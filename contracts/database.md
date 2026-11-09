@@ -42,6 +42,14 @@ then the same ordered buckets. Replay reads the original receipt without
 another debit. Closing or expiring a permit releases only concurrency.
 Active counts ignore expired permits even before cleanup.
 
+For a dynamic Web permit the Job lock also serializes validation of the
+stored Target and the hop chain. The first permit is for the root. A
+redirect needs a finished parent from the same Attempt with a matching
+request URI digest. A unique parent reference makes each continuation
+single-use. An operation ID can still replay its original grant. The
+quota ledger stores digests and hop numbers, with the same six-minute
+retention. It keeps redirect URLs and query values out of the ledger.
+
 The configured global bucket limits issuance across all Workers. Permit rows
 remain for six minutes after expiry for bounded replay protection, then the
 server removes batches of 256. Bucket usage aggregates reset at UTC midnight.
@@ -79,8 +87,11 @@ Observation, current reference and events together. A rollback releases all
 reserved positions. Positions determine delivery order. `committed_at`
 records the database clock while the writer holds the stream head lock.
 
-Current results reference immutable observations. Identical details and
-`not_modified` update confirmation freshness only. Event references also pin
+Current results reference immutable observations. Identical semantic details
+and `not_modified` update confirmation freshness only. The Web capability's
+compiled schema projects out volatile diagnostics before calculating the
+content hash. The completion receipt still binds the full normalized data.
+ Event references also pin
 observations. Job and Attempt lineage consists of UUIDs independent of
 execution retention. Authoritative withdrawals carry a scoped tombstone and
 remove current data. Each completed sample has its own observation and event.

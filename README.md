@@ -3,9 +3,9 @@
 Harvest is a standalone Go data acquisition engine. Its durable control plane
 manages Targets, schedules and Worker leases, meters outbound HTTP across
 Workers, and stores typed, scoped observations. Consumers can read the latest
-good results and replay changes or recover through a snapshot. Production
-discovery reports Web and Steam as `not_implemented`. The integration suite
-uses test-only Providers and isolated PostgreSQL and network fixtures.
+good results and replay changes or recover through a snapshot. The built-in
+Web Provider collects homepage, DNS and verified TLS evidence. Steam remains
+planned. Integration tests use isolated PostgreSQL and mock network services.
 
 ## Local development
 
@@ -92,6 +92,49 @@ Use `GET /api/v1/observations/current` and `/observations/history` for scoped
 reads. Operators enroll consumers explicitly. Consumers poll `/changes`,
 durably apply the feed, then ACK. See the [A3 acceptance and recovery guide](docs/harvest-v0.1-a3-acceptance.md)
 for cursor recovery, retention limits and the integration checks.
+
+## Web acquisition
+
+Configure explicit PostgreSQL source policies for the namespace and each
+capability you want to enable. Workers offer implementation `web_v1`,
+request schema 1 and output schema 1. Use `scope.egress_region` to select
+the configured egress region. For a homepage Job, register a `web.origin`
+Target, then submit a request such as the following inside the Job's
+`request` object.
+
+```json
+{
+  "target_id": "<registered-target-uuid>",
+  "capability": "web.http",
+  "request_schema": 1,
+  "params": {},
+  "scope": {"egress_region": "cn", "locale": "en"}
+}
+```
+
+| Capability | Target resource | Parameters | Minimum schedule interval |
+| --- | --- | --- | --- |
+| `web.http` | HTTP(S) `web.origin` | `{}`. Optional `scope.locale` sets the homepage language preference. | 15 minutes |
+| `web.dns` | `web.domain` | `{}` for all eight supported record types, or `{"types":["A","MX"]}`. | 1 hour |
+| `web.tls` | HTTPS `web.origin` | `{}` for a verified HTTPS HEAD at the root. | 6 hours |
+
+For an initial schedule, use 24 hours for HTTP and DNS and two to seven
+days for TLS. Schedules are created explicitly.
+
+Homepage acquisition starts at the registered origin's root on port 80 or
+443. A Job follows up to three same-origin redirects, with one permit per
+hop. External redirects are returned as links. Metadata includes bounded
+HTML, Open Graph, Twitter Card, JSON-LD and passive fingerprints. HTTPS
+homepage responses supply a TLS scope from the same connection. Use
+`web.tls` when a certificate-only check is needed.
+
+DNS uses the fixed [Google Public DNS DoH endpoint](https://developers.google.com/speed/public-dns/docs/doh).
+Run it only for names your policy permits sending to that recursive
+resolver. See its [privacy terms](https://developers.google.com/speed/public-dns/privacy).
+Each type consumes one HTTP permit. TTL and AD describe the resolver's
+answer. DNS record types, HTML, HTTP and TLS have independently retained
+last-known-good values. See the [B1 acceptance record](docs/harvest-v0.1-b1-acceptance.md)
+for payload semantics and measured costs.
 
 ## Docker
 

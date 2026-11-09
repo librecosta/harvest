@@ -139,6 +139,7 @@ type networkLab struct {
 	mu            sync.Mutex
 	hits          []networkHit
 	peers         map[string]string
+	pinnedTargets map[string]string // Optional exact numeric map for dynamic Web fixtures.
 	upstream      *httptest.Server
 	second        *httptest.Server
 	concurrent    atomic.Int32
@@ -311,10 +312,14 @@ func (p *fakeProxy) address() string {
 }
 
 func (p *fakeProxy) target(address string) net.Conn {
+	original := address
+	if p.lab.pinnedTargets != nil {
+		address = p.lab.pinnedTargets[address]
+	}
 	ip, err := netip.ParseAddrPort(address)
-	if err != nil || !ip.Addr().IsLoopback() ||
-		("http://"+address != p.lab.upstream.URL && "http://"+address != p.lab.second.URL) {
-		p.lab.t.Error("proxy was asked to resolve or connect to a non-fixture address")
+	if err != nil || !ip.Addr().IsLoopback() || (p.lab.pinnedTargets == nil &&
+		("http://"+address != p.lab.upstream.URL && "http://"+address != p.lab.second.URL)) {
+		p.lab.t.Errorf("proxy was asked to resolve or connect to an unauthorized address: %q", original)
 		return nil
 	}
 	dest, err := net.DialTimeout("tcp", address, time.Second)

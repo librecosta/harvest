@@ -1,5 +1,14 @@
 # Changelog
 
+## V0.1-B1
+
+- Enabled homepage metadata and 18 passive Web fingerprints, eight recursive
+  DoH record types and verified TLS evidence from HTTP or an explicit HEAD.
+- Bound dynamic destinations to stored Targets. Each same-origin redirect
+  uses its own quota permit and a single-use receipt from the prior hop.
+- Persisted independent Web result scopes with stable semantic hashes and
+  preserved their last-known-good values across partial failures.
+
 ## V0.1-A4
 
 - Persisted operational network policy in PostgreSQL with explicit import

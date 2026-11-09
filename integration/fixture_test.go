@@ -102,7 +102,15 @@ func fixtureRegistry() *provider.Registry {
 	if origins := os.Getenv("HARVEST_TEST_ORIGINS"); origins != "" {
 		manifest.Capabilities = append(manifest.Capabilities, fixtureNetwork(strings.Split(origins, ",")))
 	}
-	r, err := provider.New(append(provider.Builtins(), manifest)...)
+	builtins := provider.Builtins()
+	if os.Getenv("HARVEST_TEST_WEB") != "" {
+		for i, builtin := range builtins {
+			if builtin.Name == "web" {
+				builtins[i] = provider.WebManifest(webFixtureNetwork())
+			}
+		}
+	}
+	r, err := provider.New(append(builtins, manifest)...)
 	if err != nil {
 		panic(err)
 	}
@@ -112,7 +120,7 @@ func fixtureRegistry() *provider.Registry {
 func TestMain(m *testing.M) {
 	if len(os.Args) > 2 && os.Args[1] == "fixture" {
 		logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-		if os.Getenv("HARVEST_TEST_ORIGINS") != "" {
+		if os.Getenv("HARVEST_TEST_ORIGINS") != "" || os.Getenv("HARVEST_TEST_WEB") != "" {
 			go sampleProcessHeap()
 		}
 		if err := command.Run(os.Args[2:], fixtureRegistry(), logger); err != nil {
@@ -136,12 +144,13 @@ type testPlane struct {
 	compose      func(...string) string
 	origins      []string
 	observations bool
+	webFixture   string
 }
 
 func startFixture(t *testing.T) *testPlane {
 	t.Helper()
 	p := newFixture(t)
-	if got := p.cli("migrate", "up", "--config", p.config); got != "Applied 4 Harvest migrations." {
+	if got := p.cli("migrate", "up", "--config", p.config); got != "Applied 5 Harvest migrations." {
 		t.Fatalf("fresh PG18 migration: %q", got)
 	}
 	return p
@@ -250,7 +259,7 @@ func commandDocker(dir string, env []string, args ...string) (string, error) {
 
 func (p *testPlane) cli(args ...string) string {
 	p.t.Helper()
-	env := append(os.Environ(), "HARVEST_TEST_ORIGINS="+strings.Join(p.origins, ","))
+	env := append(os.Environ(), "HARVEST_TEST_ORIGINS="+strings.Join(p.origins, ","), "HARVEST_TEST_WEB="+p.webFixture)
 	return run(p.t, p.scratch, env, p.bin, append([]string{"fixture"}, args...)...)
 }
 
@@ -279,7 +288,7 @@ func (p *testPlane) start(args ...string) *child {
 	c := &child{cmd: exec.Command(p.bin, append([]string{"fixture"}, args...)...), done: make(chan struct{})}
 	c.cmd.Dir = p.scratch
 	c.cmd.Env = append(os.Environ(), "GOMAXPROCS=4", "HARVEST_TEST_ORIGINS="+strings.Join(p.origins, ","),
-		fmt.Sprintf("HARVEST_TEST_OBSERVATIONS=%t", p.observations),
+		fmt.Sprintf("HARVEST_TEST_OBSERVATIONS=%t", p.observations), "HARVEST_TEST_WEB="+p.webFixture,
 		"HTTP_PROXY=http://127.0.0.1:1", "HTTPS_PROXY=http://127.0.0.1:1", "ALL_PROXY=socks5://127.0.0.1:1", "NO_PROXY=*")
 	c.cmd.Stderr = &c.log
 	if err := c.cmd.Start(); err != nil {
