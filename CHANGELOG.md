@@ -1,5 +1,12 @@
 # Changelog
 
+## V0.1-A4
+
+- Persisted operational network policy in PostgreSQL with explicit import
+  and versioned operator replacement.
+- Preserved quota accounting across edits and restart. Routing revisions
+  fence old network claims while issued permits can finish.
+
 ## V0.1-A3
 
 - Added typed multi-scope observations, last-known-good results and

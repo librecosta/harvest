@@ -23,13 +23,15 @@ func Register(app *fiber.App, ready func(context.Context) bool, api *handlers.AP
 	}
 }
 
-// Allow the larger body only on the fenced Worker completion route, before
-// fasthttp reads it. Control, public and other Worker routes keep their limit.
+// Set the two larger request budgets before fasthttp reads the body.
 func requestBodyLimit(h *fasthttp.RequestHeader) fasthttp.RequestConfig {
+	path, _, _ := bytes.Cut(h.RequestURI(), []byte("?"))
+	if bytes.Equal(h.Method(), []byte("PUT")) && bytes.Equal(path, []byte("/api/v1"+networkPolicyPath)) {
+		return fasthttp.RequestConfig{MaxRequestBodySize: execution.MaxPolicyBody}
+	}
 	if !h.IsPost() {
 		return fasthttp.RequestConfig{}
 	}
-	path, _, _ := bytes.Cut(h.RequestURI(), []byte("?"))
 	id, ok := bytes.CutPrefix(path, []byte("/internal/v1/attempts/"))
 	if !ok {
 		return fasthttp.RequestConfig{}

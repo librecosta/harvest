@@ -288,5 +288,10 @@ func (e *Engine) Prune(ctx context.Context) error {
 	if err := e.queries.PruneWorkers(ctx); err != nil {
 		return err
 	}
-	return e.queries.PruneQuotaBuckets(ctx, e.quotaKeys())
+	e.admission.RLock()
+	defer e.admission.RUnlock()
+	if e.policyUncertain {
+		return nil
+	}
+	return e.queries.PruneQuotaBuckets(ctx, quotaKeys(e.network))
 }

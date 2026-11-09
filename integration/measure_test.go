@@ -22,7 +22,6 @@ import (
 
 	"github.com/librecosta/harvest/internal/config"
 	q "github.com/librecosta/harvest/internal/database/queries"
-	"github.com/librecosta/harvest/internal/egress"
 	"github.com/librecosta/harvest/internal/execution"
 	"github.com/librecosta/harvest/internal/provider"
 )
@@ -91,7 +90,7 @@ func processRSS(pid int) string {
 func measurePlans(t *testing.T, p *testPlane) {
 	t.Helper()
 	ctx := t.Context()
-	e := execution.New(p.pool, fixtureRegistry(), nil, egress.NetworkConfig{}, config.DefaultRetention())
+	e := execution.New(p.pool, fixtureRegistry(), nil, config.DefaultRetention())
 	principal := config.Principal{
 		Name: "benchmark", Role: "worker", Namespaces: []string{"benchmark"},
 		MaxSlots: 16, Capabilities: []string{fixtureOffer.Capability},

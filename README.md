@@ -67,15 +67,26 @@ ingress. Worker readiness is available through
 `harvest healthcheck --worker --config config.worker.yaml`. An embedded worker
 can use the same YAML shape under `local_worker` with the server's local URL.
 
-For a compiled HTTP capability, configure its namespace and named route under
-server `network` and grant that profile to the Worker principal. The Worker
-advertises only logical paths, regions, health and capacity. See the
-[server example](config.example.yaml) and
-[Worker example](config.worker.example.yaml) for the YAML shapes. Keep proxy
-URLs and credentials in the ignored Worker YAML. Direct fallback requires
+For a compiled HTTP capability, grant the named profile to the Worker
+principal and initialize the PostgreSQL policy once. After `task migrate
+ACTION=up` and before starting the control plane, run `task policy:init`
+against server YAML containing a complete `network` block. On upgrade,
+import the effective A3 policy to preserve its accounting baseline.
+Subsequent starts use PostgreSQL. The legacy block can be removed after
+initialization.
+
+Operators use `GET /api/v1/operations/network-policy` and `PUT` on the same
+path. Replacement takes `expected_revision` and the complete `policy`
+object returned by GET. The operator must cover all source namespaces and
+capabilities in the old and new policies. See the
+[A4 acceptance record](docs/harvest-v0.1-a4-acceptance.md) for details.
+
+Worker-local proxy URLs and credentials stay in the
+[Worker YAML](config.worker.example.yaml). Workers advertise only logical
+paths, regions, health and capacity. Direct fallback requires
 `prefer_proxy` with `allow_direct: true` on both sides and a capability that
-permits direct access. A2 supports fixed-origin HTTP(S) over direct connections,
-HTTP(S) CONNECT and SOCKS5. See the [A2 acceptance record](docs/harvest-v0.1-a2-acceptance.md).
+permits direct access. Supported transports include direct HTTP(S), HTTP(S)
+CONNECT and SOCKS5.
 
 Use `GET /api/v1/observations/current` and `/observations/history` for scoped
 reads. Operators enroll consumers explicitly. Consumers poll `/changes`,

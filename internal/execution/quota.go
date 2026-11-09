@@ -40,6 +40,9 @@ func (e *Engine) Permit(ctx context.Context, p config.Principal, id uuid.UUID, i
 	if e.draining.Load() {
 		return egress.Grant{}, ErrDraining
 	}
+	if e.policyUncertain {
+		return egress.Grant{}, ErrPolicyUnavailable
+	}
 	return tx(ctx, e, func(db *q.Queries) (egress.Grant, error) {
 		job, attempt, worker, err := lockAttempt(ctx, db, p, id, in.Fence)
 		if err != nil {
@@ -61,6 +64,9 @@ func (e *Engine) Permit(ctx context.Context, p config.Principal, id uuid.UUID, i
 		}
 		if job.State != "running" || !validLease(job, attempt, now) {
 			return egress.Grant{}, ErrFence
+		}
+		if attempt.NetworkRevision == 0 || attempt.NetworkRevision != e.policy.RoutingRevision {
+			return egress.Grant{}, ErrPolicyChanged
 		}
 		hash, err := hashValue(in.Intent)
 		if err != nil {
@@ -166,8 +172,7 @@ func (e *Engine) availableQuota(buckets []q.HarvestQuotaBucket, counts []q.Count
 	for _, b := range buckets {
 		i := slices.IndexFunc(e.network.Quotas, func(c egress.QuotaConfig) bool { return c.ID == b.Key })
 		cfg := e.network.Quotas[i]
-		elapsed := min(max(now.Sub(b.RefilledAt), 0), 24*time.Hour)
-		tokens := min(cfg.Burst*unitsPerToken, b.Balance+cfg.PerMinute*elapsed.Microseconds())
+		tokens := refillQuota(cfg, b, now)
 		wait := b.CooldownUntil.Sub(now)
 		if tokens < unitsPerToken {
 			deficit := unitsPerToken - tokens

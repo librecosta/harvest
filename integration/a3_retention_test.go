@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/librecosta/harvest/internal/config"
-	"github.com/librecosta/harvest/internal/egress"
 	"github.com/librecosta/harvest/internal/execution"
 )
 
@@ -43,7 +42,7 @@ func testA3Retention(t *testing.T, p *testPlane) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := execution.New(p.pool, fixtureRegistry(), cfg.Principals, egress.NetworkConfig{}, cfg.Retention)
+	e := execution.New(p.pool, fixtureRegistry(), cfg.Principals, cfg.Retention)
 	prune := func(e *execution.Engine, floor int64) {
 		t.Helper()
 		a3Exec(t, p, "UPDATE harvest.change_heads SET last_pruned_at='epoch' WHERE stream=$1", stream)
@@ -74,7 +73,7 @@ func testA3Retention(t *testing.T, p *testPlane) {
 	// The actual pruning SQL, reset invalidation and read path are unchanged.
 	limits := cfg.Retention
 	limits.EventRows = 1
-	pressure := execution.New(p.pool, fixtureRegistry(), cfg.Principals, egress.NetworkConfig{}, limits)
+	pressure := execution.New(p.pool, fixtureRegistry(), cfg.Principals, limits)
 	prune(pressure, 3)
 	if n := a3Count(t, p, "SELECT count(*) FROM harvest.consumers WHERE stream=$1 AND reset_required AND reset_id IS NULL", stream); n != 2 {
 		t.Fatal("prune floor moved without invalidating lagging consumer and reset")

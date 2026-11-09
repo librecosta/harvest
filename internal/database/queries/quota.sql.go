@@ -116,7 +116,7 @@ func (q *Queries) DeferQuota(ctx context.Context, keys []string) error {
 
 const ensureQuotaBuckets = `-- name: EnsureQuotaBuckets :exec
 INSERT INTO harvest.quota_buckets (key, balance, refilled_at)
-SELECT k, 0, 'epoch' FROM unnest($1::text[]) AS k ORDER BY k
+SELECT k, 0, 'epoch' FROM unnest($1::text[]) AS k ORDER BY k COLLATE "C"
 ON CONFLICT (key) DO NOTHING
 `
 
@@ -258,6 +258,7 @@ DELETE FROM harvest.quota_buckets WHERE key IN (
     SELECT key FROM harvest.quota_buckets
     WHERE NOT (key = ANY($1::text[]))
       AND refilled_at < statement_timestamp() - interval '30 days'
+      AND cooldown_until <= statement_timestamp()
       AND NOT EXISTS (SELECT 1 FROM harvest.quota_permits p WHERE p.bucket_keys @> ARRAY[quota_buckets.key])
     ORDER BY key LIMIT 32 FOR UPDATE SKIP LOCKED
 )

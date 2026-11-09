@@ -3,7 +3,6 @@ package execution
 import (
 	"context"
 	json "encoding/json/v2"
-	"errors"
 	"slices"
 	"strings"
 
@@ -12,32 +11,6 @@ import (
 	"github.com/librecosta/harvest/internal/egress"
 	"github.com/librecosta/harvest/internal/provider"
 )
-
-func (e *Engine) PrepareNetwork(ctx context.Context) error {
-	for _, rule := range e.network.Sources {
-		cap, ok := e.Registry.Capability(rule.Capability)
-		if !ok || cap.Execute == nil || cap.Network == nil {
-			return errors.New("network source policy requires a compiled HTTP capability")
-		}
-		route := e.route(rule.Profile)
-		if (route.Mode == egress.Direct || route.AllowDirect) && !cap.Network.AllowDirect {
-			return errors.New("network source policy exceeds the capability's direct allowance")
-		}
-	}
-	keys := e.quotaKeys()
-	if len(keys) == 0 {
-		return nil
-	}
-	return e.queries.EnsureQuotaBuckets(ctx, keys)
-}
-
-func (e *Engine) quotaKeys() []string {
-	keys := make([]string, 0, len(e.network.Quotas))
-	for _, q := range e.network.Quotas {
-		keys = append(keys, q.ID)
-	}
-	return keys
-}
 
 func (e *Engine) route(profile string) egress.RouteConfig {
 	for _, r := range e.network.Routes {
@@ -85,7 +58,11 @@ func (e *Engine) validatePaths(p config.Principal, capacity int32, paths []egres
 			(i > 0 && paths[i-1].Profile == a.Profile && paths[i-1].ID == a.ID) {
 			return nil, ErrForbidden
 		}
-		if _, ok := routePath(e.route(a.Profile), a); !ok {
+		// A granted local path may be advertised ahead of a policy change.
+		// A matching central route is still required for claim and permit.
+		if !provider.Identifier(a.ID) || !egress.Mode(a.Mode) || (a.Region != "" && (len(a.Region) > 16 || !provider.Identifier(a.Region))) ||
+			(a.Kind == egress.Direct && (a.ID != egress.Direct || a.Mode == egress.RequireProxy)) ||
+			(a.Kind != egress.Direct && (!egress.ProxyKind(a.Kind) || a.ID == egress.Direct || a.Mode == egress.Direct)) {
 			return nil, ErrForbidden
 		}
 		switch a.State {
@@ -138,7 +115,7 @@ func (e *Engine) dispatchOffers(ctx context.Context, db *q.Queries, p config.Pri
 	}
 	var local, network []string
 	var accounts []string
-	if len(paths) != 0 {
+	if len(paths) != 0 && !e.policyUncertain {
 		for _, rule := range e.network.Sources {
 			if canNamespace(p, rule.Namespace) && canCapability(p, rule.Capability) {
 				accounts = append(accounts, rule.AccountBucket)
@@ -159,6 +136,9 @@ func (e *Engine) dispatchOffers(ctx context.Context, db *q.Queries, p config.Pri
 		}
 		if cap.Network == nil {
 			local = append(local, cap.Key())
+			continue
+		}
+		if e.policyUncertain {
 			continue
 		}
 		for _, rule := range e.network.Sources {
@@ -182,6 +162,9 @@ func (e *Engine) dispatchOffers(ctx context.Context, db *q.Queries, p config.Pri
 }
 
 func (e *Engine) networkWaiting(ctx context.Context, job q.HarvestJob, cap provider.Capability) (string, error) {
+	if e.policyUncertain {
+		return "egress_policy_unavailable", nil
+	}
 	rule := e.source(cap.Capability, job.Namespace)
 	if rule.Profile == "" {
 		return "egress_policy_unavailable", nil

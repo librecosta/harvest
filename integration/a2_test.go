@@ -147,7 +147,7 @@ func upgradeA1(t *testing.T, p *testPlane) {
 		t.Fatal(err)
 	}
 	expectFailure(t, p.scratch, nil, p.bin, "schema is unavailable or incompatible", "fixture", "serve", "--local", "--config", p.config)
-	if got := p.cli("migrate", "up", "--config", p.config); got != "Applied 2 Harvest migrations." {
+	if got := p.cli("migrate", "up", "--config", p.config); got != "Applied 3 Harvest migrations." {
 		t.Fatalf("A1 upgrade: %s", got)
 	}
 	var key string
@@ -166,6 +166,7 @@ func TestA2(t *testing.T) {
 	backup := lab.proxy("http_backup", "http", "")
 	b := lab.proxy("socks_b", "socks5", "")
 	configA, configB := setupA2(t, p, a, backup, b)
+	p.cli("policy", "init", "--config", p.config)
 	control := measureControl(t, p, configA, configB)
 	server := p.serve()
 	workerA := p.start("worker", "--config", configA)

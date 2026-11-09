@@ -151,8 +151,12 @@ func (e *Engine) Claim(ctx context.Context, p config.Principal, id uuid.UUID) (*
 			return nil, err
 		}
 		until := leaseEnd(job, now)
+		var networkRevision int64
+		if work.capability.Network != nil {
+			networkRevision = e.policy.RoutingRevision
+		}
 		a, err := db.InsertAttempt(ctx, q.InsertAttemptParams{
-			ID: uuid.NewV7(), JobID: job.ID, WorkerID: w.ID, Generation: job.Generation, ClaimedAt: now, LeaseUntil: until,
+			ID: uuid.NewV7(), JobID: job.ID, WorkerID: w.ID, Generation: job.Generation, ClaimedAt: now, LeaseUntil: until, NetworkRevision: networkRevision,
 		})
 		if err != nil {
 			return nil, err
@@ -332,7 +336,7 @@ func normalizeResult(cap provider.Capability, result provider.Result) (provider.
 			return result, false, ErrInvalid
 		}
 		switch result.Code {
-		case "upstream_unavailable", "transport_error", "timeout", "internal_unavailable", "network_quota_deferred":
+		case "upstream_unavailable", "transport_error", "timeout", "internal_unavailable", "network_quota_deferred", "network_policy_changed":
 			retryable = true
 		case "invalid_payload", "policy_denied", "upstream_auth", "upstream_throttled", "incomplete":
 		default:

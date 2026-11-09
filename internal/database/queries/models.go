@@ -11,18 +11,19 @@ import (
 )
 
 type HarvestAttempt struct {
-	ID           uuid.UUID  `json:"id"`
-	JobID        uuid.UUID  `json:"job_id"`
-	WorkerID     uuid.UUID  `json:"worker_id"`
-	Generation   int64      `json:"generation"`
-	ClaimedAt    time.Time  `json:"claimed_at"`
-	HeartbeatAt  time.Time  `json:"heartbeat_at"`
-	LeaseUntil   time.Time  `json:"lease_until"`
-	EndedAt      *time.Time `json:"ended_at"`
-	State        string     `json:"state"`
-	ErrorCode    string     `json:"error_code"`
-	ResultHash   []byte     `json:"result_hash"`
-	ReceiptState *string    `json:"receipt_state"`
+	ID              uuid.UUID  `json:"id"`
+	JobID           uuid.UUID  `json:"job_id"`
+	WorkerID        uuid.UUID  `json:"worker_id"`
+	Generation      int64      `json:"generation"`
+	ClaimedAt       time.Time  `json:"claimed_at"`
+	HeartbeatAt     time.Time  `json:"heartbeat_at"`
+	LeaseUntil      time.Time  `json:"lease_until"`
+	EndedAt         *time.Time `json:"ended_at"`
+	State           string     `json:"state"`
+	ErrorCode       string     `json:"error_code"`
+	ResultHash      []byte     `json:"result_hash"`
+	ReceiptState    *string    `json:"receipt_state"`
+	NetworkRevision int64      `json:"network_revision"`
 }
 
 type HarvestChangeEvent struct {
@@ -131,6 +132,17 @@ type HarvestObservation struct {
 	JobID        uuid.UUID `json:"job_id"`
 	AttemptID    uuid.UUID `json:"attempt_id"`
 	StoredBytes  int32     `json:"stored_bytes"`
+}
+
+type HarvestOperationalPolicy struct {
+	Name            string    `json:"name"`
+	Revision        int64     `json:"revision"`
+	RoutingRevision int64     `json:"routing_revision"`
+	Policy          []byte    `json:"policy"`
+	Bindings        []byte    `json:"bindings"`
+	Checksum        []byte    `json:"checksum"`
+	UpdatedAt       time.Time `json:"updated_at"`
+	UpdatedBy       string    `json:"updated_by"`
 }
 
 type HarvestQuotaBucket struct {

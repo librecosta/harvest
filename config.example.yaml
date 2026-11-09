@@ -34,7 +34,9 @@ database:
 #     egress_profiles: ["regional"]
 #     max_slots: 2
 
-# Example policy for a compiled HTTP capability. Substitute its actual ID.
+# One-time policy:init input for a compiled HTTP capability.
+# Substitute its actual ID and grant the profile to an eligible Worker.
+# PostgreSQL owns the active policy after initialization. Serve ignores this block.
 # network:
 #   global_bucket: "cluster"
 #   routes:

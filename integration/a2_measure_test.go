@@ -92,18 +92,19 @@ func measureA2(t *testing.T, p *testPlane, lab *networkLab, control *permitMetri
 		t.Fatal(err)
 	}
 	type stats struct {
-		statements, inserted, heap int64
-		lsn                        string
+		statements, inserted, heap, policySQL int64
+		lsn                                   string
 	}
 	get := func() stats {
 		t.Helper()
 		var s stats
 		err := p.pool.QueryRow(ctx, `SELECT coalesce(sum(calls),0)::bigint,
 			coalesce(sum(calls) FILTER (WHERE query LIKE '%INSERT INTO harvest.quota_permits%'),0)::bigint,
+			coalesce(sum(calls) FILTER (WHERE query LIKE '%harvest.operational_policies%'),0)::bigint,
 			pg_total_relation_size('harvest.quota_permits')+pg_total_relation_size('harvest.quota_buckets'),
 			pg_current_wal_insert_lsn()::text
 			FROM pg_stat_statements WHERE dbid=(SELECT oid FROM pg_database WHERE datname=current_database())
-				AND query NOT LIKE '%pg_stat_statements%' AND query NOT LIKE '%pg_stat_activity%'`).Scan(&s.statements, &s.inserted, &s.heap, &s.lsn)
+				AND query NOT LIKE '%pg_stat_statements%' AND query NOT LIKE '%pg_stat_activity%'`).Scan(&s.statements, &s.inserted, &s.policySQL, &s.heap, &s.lsn)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -165,6 +166,10 @@ func measureA2(t *testing.T, p *testPlane, lab *networkLab, control *permitMetri
 	}
 	after := get()
 	seconds := time.Since(start).Seconds()
+	if after.policySQL != before.policySQL || before.policySQL != base.policySQL {
+		t.Fatal("network path queried the durable policy after startup")
+	}
+	t.Log("policy SQL during idle and loaded request phases: 0")
 	cancel()
 	poll.Wait()
 	var wal int64

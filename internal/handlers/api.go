@@ -110,6 +110,12 @@ func (a *API) respond(c fiber.Ctx, status int, value any, err error) error {
 		return problem(c, 413, err.Error(), info.id)
 	case errors.Is(err, execution.ErrStoragePressure):
 		return problem(c, 503, err.Error(), info.id)
+	case errors.Is(err, execution.ErrPolicyInvalid):
+		return problem(c, 400, err.Error(), info.id)
+	case errors.Is(err, execution.ErrPolicyConflict), errors.Is(err, execution.ErrPolicyMissing), errors.Is(err, execution.ErrPolicyBinding), errors.Is(err, execution.ErrPolicyChanged):
+		return problem(c, 409, err.Error(), info.id)
+	case errors.Is(err, execution.ErrPolicyUnavailable):
+		return problem(c, 503, err.Error(), info.id)
 	case errors.Is(err, execution.ErrInvalid):
 		return problem(c, 400, err.Error(), info.id)
 	case errors.Is(err, execution.ErrForbidden):

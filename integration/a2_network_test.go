@@ -46,7 +46,7 @@ func fixtureNetwork(origins []string) provider.Capability {
 			p, err := provider.Object[networkParams](data)
 			if err != nil || !provider.Identifier(p.Label) || !slices.Contains([]string{
 				"ok", "sdk", "redirect", "private", "unsafe", "hold", "hold_long", "leak", "large", "bench",
-				"status401", "status403", "status429", "delayed",
+				"status401", "status403", "status429", "delayed", "held",
 			}, p.Mode) {
 				return nil, errors.New("invalid network fixture")
 			}
@@ -143,10 +143,11 @@ type networkLab struct {
 	second        *httptest.Server
 	concurrent    atomic.Int32
 	maxConcurrent atomic.Int32
+	releaseHeld   chan struct{}
 }
 
 func newNetworkLab(t *testing.T) *networkLab {
-	l := &networkLab{t: t, peers: make(map[string]string)}
+	l := &networkLab{t: t, peers: make(map[string]string), releaseHeld: make(chan struct{})}
 	l.second = httptest.NewServer(http.HandlerFunc(l.handle))
 	l.upstream = httptest.NewServer(http.HandlerFunc(l.handle))
 	t.Cleanup(l.second.Close)
@@ -210,6 +211,14 @@ func (l *networkLab) handle(w http.ResponseWriter, r *http.Request) {
 		w.(http.Flusher).Flush()
 		_, _ = io.WriteString(w, strings.Repeat("x", 2048))
 		return
+	case "held":
+		_, _ = io.WriteString(w, "a")
+		w.(http.Flusher).Flush()
+		select {
+		case <-l.releaseHeld:
+		case <-r.Context().Done():
+			return
+		}
 	case "hold", "hold_long", "leak":
 		if parts[0] == "hold_long" && previous {
 			break

@@ -139,11 +139,12 @@ func execute(ctx context.Context, api client, registry *provider.Registry, pool 
 	workCtx, cancelWork := context.WithTimeout(ctx, cap.Timeout)
 	defer cancelWork()
 	var network egress.Client
+	var policyChanged atomic.Bool
 	if cap.Network != nil {
 		if claim.Network == nil {
 			return
 		}
-		session := pool.Session(workCtx, *claim.Network, *cap.Network, claim.Task.Namespace, cap.Capability, permitGate{api, claim})
+		session := pool.Session(workCtx, *claim.Network, *cap.Network, claim.Task.Namespace, cap.Capability, permitGate{api, claim, &policyChanged})
 		defer session.Close()
 		network = session.Client()
 	}
@@ -197,10 +198,17 @@ func execute(ctx context.Context, api client, registry *provider.Registry, pool 
 		case outcome := <-completed:
 			cancelWork()
 			completed, workDone = nil, nil
+			if policyChanged.Load() {
+				outcome = provider.Result{State: "failed", Code: "network_policy_changed"}
+			}
 			pending = &outcome
 		case <-workDone:
 			completed, workDone = nil, nil
-			pending = &provider.Result{State: "failed", Code: "timeout"}
+			code := "timeout"
+			if policyChanged.Load() {
+				code = "network_policy_changed"
+			}
+			pending = &provider.Result{State: "failed", Code: code}
 		case <-retry:
 			retry = nil
 		case <-renew.C:

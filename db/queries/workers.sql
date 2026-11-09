@@ -18,8 +18,8 @@ SELECT count(*) FROM harvest.attempts
 WHERE worker_id = $1 AND state = 'running' AND lease_until > statement_timestamp();
 
 -- name: InsertAttempt :one
-INSERT INTO harvest.attempts (id, job_id, worker_id, generation, claimed_at, heartbeat_at, lease_until)
-VALUES ($1, $2, $3, $4, $5, $5, $6)
+INSERT INTO harvest.attempts (id, job_id, worker_id, generation, claimed_at, heartbeat_at, lease_until, network_revision)
+VALUES ($1, $2, $3, $4, $5, $5, $6, $7)
 RETURNING *;
 
 -- name: Attempt :one

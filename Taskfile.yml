@@ -84,6 +84,13 @@ tasks:
     cmds:
       - go run ./cmd/harvest migrate "$HARVEST_TASK_ACTION" --config "$HARVEST_TASK_CONFIG"
 
+  policy:init:
+    desc: Import the legacy server network block once into PostgreSQL
+    env:
+      HARVEST_TASK_CONFIG: '{{.CONFIG}}'
+    cmds:
+      - go run ./cmd/harvest policy init --config "$HARVEST_TASK_CONFIG"
+
   check:docker:
     desc: Validate deployment Compose and build the local Linux image
     cmds:
@@ -91,6 +98,6 @@ tasks:
       - docker build -t harvest:local .
 
   check:containers:
-    desc: Verify lifecycle, execution, metered egress and result recovery on disposable PostgreSQL 18
+    desc: Verify lifecycle, execution, egress, recovery and live policy on disposable PostgreSQL 18
     cmds:
       - go test -tags=integration -count=1 -timeout=8m -v ./integration

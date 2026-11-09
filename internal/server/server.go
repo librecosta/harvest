@@ -62,8 +62,11 @@ func Run(ctx context.Context, cfg config.Config, registry *provider.Registry, lo
 		}
 		return err
 	}
-	engine := execution.New(pool, registry, cfg.Principals, cfg.Network, cfg.Retention)
-	if err := engine.PrepareNetwork(ctx); err != nil {
+	engine := execution.New(pool, registry, cfg.Principals, cfg.Retention)
+	check, cancel = context.WithTimeout(ctx, 3*time.Second)
+	err = engine.LoadNetworkPolicy(check)
+	cancel()
+	if err != nil {
 		pool.Close()
 		return err
 	}

@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"net/http"
+	"sync/atomic"
 	"time"
 	"uuid"
 
@@ -11,8 +12,9 @@ import (
 )
 
 type permitGate struct {
-	client client
-	claim  execution.Claim
+	client        client
+	claim         execution.Claim
+	policyChanged *atomic.Bool
 }
 
 func (g permitGate) Acquire(ctx context.Context, in egress.Intent) (egress.Grant, error) {
@@ -27,6 +29,10 @@ func (g permitGate) Acquire(ctx context.Context, in egress.Intent) (egress.Grant
 		stop()
 		if err == nil && ok && (out.RetryMS > 0 || (execution.UUIDv7(out.ID) && out.LeaseMS > 0)) {
 			return out, nil
+		}
+		if responseCode(err, "network_policy_changed") {
+			g.policyChanged.Store(true)
+			return egress.Grant{}, egress.ErrPolicy
 		}
 		if responseCode(err, "network_budget_exhausted") {
 			return egress.Grant{}, egress.ErrBudget

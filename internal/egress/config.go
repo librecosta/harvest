@@ -25,39 +25,39 @@ type EndpointConfig struct {
 }
 
 type NetworkConfig struct {
-	GlobalBucket string         `mapstructure:"global_bucket"`
-	Routes       []RouteConfig  `mapstructure:"routes"`
-	Sources      []SourceConfig `mapstructure:"sources"`
-	Quotas       []QuotaConfig  `mapstructure:"quotas"`
+	GlobalBucket string         `mapstructure:"global_bucket" json:"global_bucket"`
+	Routes       []RouteConfig  `mapstructure:"routes" json:"routes"`
+	Sources      []SourceConfig `mapstructure:"sources" json:"sources"`
+	Quotas       []QuotaConfig  `mapstructure:"quotas" json:"quotas"`
 }
 
 type RouteConfig struct {
-	Profile     string       `mapstructure:"profile"`
-	Mode        string       `mapstructure:"mode"`
-	AllowDirect bool         `mapstructure:"allow_direct"`
-	Paths       []PathConfig `mapstructure:"paths"`
+	Profile     string       `mapstructure:"profile" json:"profile"`
+	Mode        string       `mapstructure:"mode" json:"mode"`
+	AllowDirect bool         `mapstructure:"allow_direct" json:"allow_direct"`
+	Paths       []PathConfig `mapstructure:"paths" json:"paths"`
 }
 
 type PathConfig struct {
-	ID     string `mapstructure:"id"`
-	Kind   string `mapstructure:"kind"`
-	Region string `mapstructure:"region"`
-	Bucket string `mapstructure:"bucket"`
+	ID     string `mapstructure:"id" json:"id"`
+	Kind   string `mapstructure:"kind" json:"kind"`
+	Region string `mapstructure:"region" json:"region"`
+	Bucket string `mapstructure:"bucket" json:"bucket"`
 }
 
 func (p PathConfig) Path() Path { return Path{p.ID, p.Kind, p.Region} }
 
 type SourceConfig struct {
-	Capability     string `mapstructure:"capability"`
-	Namespace      string `mapstructure:"namespace"`
-	Profile        string `mapstructure:"profile"`
-	ProviderBucket string `mapstructure:"provider_bucket"`
-	AccountBucket  string `mapstructure:"account_bucket"`
+	Capability     string `mapstructure:"capability" json:"capability"`
+	Namespace      string `mapstructure:"namespace" json:"namespace"`
+	Profile        string `mapstructure:"profile" json:"profile"`
+	ProviderBucket string `mapstructure:"provider_bucket" json:"provider_bucket"`
+	AccountBucket  string `mapstructure:"account_bucket" json:"account_bucket"`
 }
 
 type QuotaConfig struct {
-	ID          string `mapstructure:"id"`
-	Burst       int64  `mapstructure:"burst"`
-	PerMinute   int64  `mapstructure:"per_minute"`
-	Concurrency int64  `mapstructure:"concurrency"`
+	ID          string `mapstructure:"id" json:"id"`
+	Burst       int64  `mapstructure:"burst" json:"burst"`
+	PerMinute   int64  `mapstructure:"per_minute" json:"per_minute"`
+	Concurrency int64  `mapstructure:"concurrency" json:"concurrency"`
 }

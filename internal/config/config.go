@@ -69,7 +69,7 @@ func Load(path string) (Config, error) {
 	if err := cfg.validate(); err != nil {
 		return cfg, err
 	}
-	if err := validateNetwork(cfg); err != nil {
+	if err := ValidateNetwork(cfg.Network); err != nil {
 		return cfg, err
 	}
 	if err := cfg.Retention.validate(); err != nil {

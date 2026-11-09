@@ -13,8 +13,8 @@ The integration harness adds a Provider when it re-executes its test binary.
 `internal/egress` owns Worker-local transports, route selection, pinned DNS,
 endpoint health and the scoped HTTP client. Each source round trip acquires
 an Attempt-fenced permit before dialing. `internal/execution` derives quota
-buckets from server YAML, the stored Job, compiled capability and authorized
-Worker path. The Worker releases a permit after closing the body.
+buckets from the active PostgreSQL policy, stored Job, compiled capability
+and authorized Worker path. The Worker releases a permit after closing the body.
 
 `internal/execution` also owns scoped Observation acceptance, last-known-good,
 change-stream cursors and retention. It commits acquisition results under the
@@ -45,3 +45,5 @@ the checkout. The request cancels the same context used for OS signals.
 - [A2 acceptance](../docs/harvest-v0.1-a2-acceptance.md)
 - [A3 implementation scope](../docs/harvest-v0.1-a3-observation-change-stream-retention.md)
 - [A3 acceptance and recovery](../docs/harvest-v0.1-a3-acceptance.md)
+- [A4 implementation scope](../docs/harvest-v0.1-a4-operational-policy-persistence.md)
+- [A4 acceptance](../docs/harvest-v0.1-a4-acceptance.md)

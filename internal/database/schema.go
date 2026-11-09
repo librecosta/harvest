@@ -7,7 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const schemaVersion = 3
+const schemaVersion = 4
 
 func CheckSchema(ctx context.Context, pool *pgxpool.Pool) error {
 	// Goose owns this table, so it is intentionally absent from sqlc's DDL.
@@ -21,6 +21,9 @@ func CheckSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		AND pg_catalog.to_regclass('harvest.observations') IS NOT NULL AND pg_catalog.to_regclass('harvest.current_results') IS NOT NULL
 		AND pg_catalog.to_regclass('harvest.change_heads') IS NOT NULL AND pg_catalog.to_regclass('harvest.change_events') IS NOT NULL
 		AND pg_catalog.to_regclass('harvest.consumers') IS NOT NULL
+		AND pg_catalog.to_regclass('harvest.operational_policies') IS NOT NULL
+		AND EXISTS (SELECT 1 FROM pg_catalog.pg_attribute WHERE attrelid = pg_catalog.to_regclass('harvest.attempts')
+			AND attname = 'network_revision' AND NOT attisdropped)
 		AND EXISTS (SELECT 1 FROM pg_catalog.pg_attribute WHERE attrelid = pg_catalog.to_regclass('harvest.workers')
 			AND attname = 'network_paths' AND NOT attisdropped)
 		FROM public.goose_db_version ORDER BY id DESC LIMIT 1`).

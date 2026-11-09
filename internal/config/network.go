@@ -68,8 +68,8 @@ func validateEgress(c egress.Config) error {
 	return nil
 }
 
-func validateNetwork(cfg Config) error {
-	c := cfg.Network
+// ValidateNetwork checks the nonsecret policy document shape and references.
+func ValidateNetwork(c egress.NetworkConfig) error {
 	if len(c.Routes) == 0 && len(c.Sources) == 0 && len(c.Quotas) == 0 && c.GlobalBucket == "" {
 		return nil
 	}

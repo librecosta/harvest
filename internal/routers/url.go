@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	LivePath  = "/livez"
-	ReadyPath = "/readyz"
+	networkPolicyPath = "/operations/network-policy"
+	LivePath          = "/livez"
+	ReadyPath         = "/readyz"
 )
 
 func registerURLs(consumer, worker fiber.Router, h *handlers.API, ready func(context.Context) bool) {
@@ -31,6 +32,8 @@ func registerURLs(consumer, worker fiber.Router, h *handlers.API, ready func(con
 	consumer.Post("/jobs/:id/cancel", operator, h.CancelJob)
 	consumer.Post("/jobs/:id/retry", operator, h.RetryJob)
 	consumer.Get("/operations/status", operator, h.Operations)
+	consumer.Get(networkPolicyPath, operator, h.NetworkPolicy)
+	consumer.Put(networkPolicyPath, operator, h.ReplaceNetworkPolicy())
 	consumer.Get("/observations/current", h.CurrentResults)
 	consumer.Get("/observations/history", h.ObservationHistory)
 	consumer.Get("/changes", h.Changes)

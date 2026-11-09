@@ -141,7 +141,7 @@ type testPlane struct {
 func startFixture(t *testing.T) *testPlane {
 	t.Helper()
 	p := newFixture(t)
-	if got := p.cli("migrate", "up", "--config", p.config); got != "Applied 3 Harvest migrations." {
+	if got := p.cli("migrate", "up", "--config", p.config); got != "Applied 4 Harvest migrations." {
 		t.Fatalf("fresh PG18 migration: %q", got)
 	}
 	return p
@@ -250,7 +250,8 @@ func commandDocker(dir string, env []string, args ...string) (string, error) {
 
 func (p *testPlane) cli(args ...string) string {
 	p.t.Helper()
-	return run(p.t, p.scratch, nil, p.bin, append([]string{"fixture"}, args...)...)
+	env := append(os.Environ(), "HARVEST_TEST_ORIGINS="+strings.Join(p.origins, ","))
+	return run(p.t, p.scratch, env, p.bin, append([]string{"fixture"}, args...)...)
 }
 
 func (p *testPlane) workerYAML(name string) string {

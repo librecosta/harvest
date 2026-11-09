@@ -27,12 +27,15 @@ type Engine struct {
 	admission        sync.RWMutex
 	draining         atomic.Bool
 	workerPolicies   []config.Principal
-	network          egress.NetworkConfig
+	network          egress.NetworkConfig // admission guards the effective policy and all dependent operations.
+	policy           q.HarvestOperationalPolicy
+	quotaBindings    map[string]string
+	policyUncertain  bool
 	retention        config.Retention
 	consumerPolicies map[string]config.Principal
 }
 
-func New(db *pgxpool.Pool, registry *provider.Registry, principals []config.Principal, network egress.NetworkConfig, retention config.Retention) *Engine {
+func New(db *pgxpool.Pool, registry *provider.Registry, principals []config.Principal, retention config.Retention) *Engine {
 	if retention == (config.Retention{}) {
 		retention = config.DefaultRetention()
 	}
@@ -45,7 +48,7 @@ func New(db *pgxpool.Pool, registry *provider.Registry, principals []config.Prin
 			consumers[p.Name] = config.Principal{Name: p.Name, Role: p.Role, Namespaces: slices.Clone(p.Namespaces), Capabilities: slices.Clone(p.Capabilities)}
 		}
 	}
-	return &Engine{Registry: registry, db: db, queries: q.New(db), workerPolicies: workers, network: network, retention: retention, consumerPolicies: consumers}
+	return &Engine{Registry: registry, db: db, queries: q.New(db), workerPolicies: workers, retention: retention, consumerPolicies: consumers}
 }
 
 func (e *Engine) Drain() {

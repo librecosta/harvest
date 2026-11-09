@@ -45,8 +45,29 @@ Active counts ignore expired permits even before cleanup.
 The configured global bucket limits issuance across all Workers. Permit rows
 remain for six minutes after expiry for bounded replay protection, then the
 server removes batches of 256. Bucket usage aggregates reset at UTC midnight.
-Bucket balances and source cooldowns survive that reset. Startup may ensure
-configured bucket rows after schema compatibility succeeds.
+Bucket balances and source cooldowns survive that reset.
+
+The explicit `policy init` command creates the singleton network policy and
+missing quota rows atomically. Existing rows retain balances, timestamps,
+cooldown and metrics. Startup loads and verifies the typed document and
+checksum. The operator API uses full replacement and revision CAS.
+
+A single active control plane owns live policy. Its admission barrier covers
+policy reads, claims, permit issuance and affected pruning. Replacement
+locks the policy row and affected bucket rows in key order. It settles
+elapsed refill under the previous rates at PostgreSQL time, clamps to the
+new bursts and preserves existing cooldown and counters. Added or
+reactivated quotas accrue from zero at activation. A bounded ledger
+preserves logical quota bindings across removal. Permit finish uses the
+original reservation's bucket identities.
+
+An Attempt records the routing revision in its claim transaction. A
+routing edit invalidates previous network Attempts for new grants and
+grant replay. Numeric edits keep the routing revision. The replacement
+publishes its effective in-memory state after commit while admission is
+still held. An ambiguous commit is checked against PostgreSQL before
+admission resumes. A failed recheck leaves network admission closed until
+an operator retries replacement or the server reloads the policy.
 
 A3 completion locks the Job and verifies its Attempt fence, then takes a
 transaction-scoped lock on the Target and capability. It reads current rows

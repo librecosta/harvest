@@ -16,7 +16,6 @@ import (
 
 	"github.com/librecosta/harvest/internal/config"
 	q "github.com/librecosta/harvest/internal/database/queries"
-	"github.com/librecosta/harvest/internal/egress"
 	"github.com/librecosta/harvest/internal/execution"
 	"github.com/librecosta/harvest/internal/provider"
 )
@@ -343,8 +342,8 @@ func testSchedules(t *testing.T, p *testPlane) {
 	t.Helper()
 	ctx := t.Context()
 	registry := fixtureRegistry()
-	e := execution.New(p.pool, registry, nil, egress.NetworkConfig{}, config.DefaultRetention())
-	second := execution.New(p.pool, registry, nil, egress.NetworkConfig{}, config.DefaultRetention())
+	e := execution.New(p.pool, registry, nil, config.DefaultRetention())
+	second := execution.New(p.pool, registry, nil, config.DefaultRetention())
 	auth := config.Principal{Name: "schedule_test", Role: "operator", Namespaces: []string{"scheduler"}}
 	target, err := e.RegisterTarget(ctx, auth, execution.TargetInput{Provider: "fixture", ResourceType: "key", ExternalKey: "calendar", Namespace: "scheduler"})
 	if err != nil {
@@ -382,7 +381,7 @@ func testSchedules(t *testing.T, p *testPlane) {
 			t.Fatal(err)
 		}
 	}
-	e = execution.New(p.pool, registry, nil, egress.NetworkConfig{}, config.DefaultRetention())
+	e = execution.New(p.pool, registry, nil, config.DefaultRetention())
 	if err := e.Reconcile(ctx); err != nil {
 		t.Fatal(err)
 	}

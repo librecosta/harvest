@@ -20,6 +20,7 @@ type Operations struct {
 	DBPressure      DBPressure           `json:"db_pressure"`
 	Draining        bool                 `json:"draining"`
 	Results         ResultStorage        `json:"results"`
+	NetworkPolicy   PolicyStatus         `json:"network_policy"`
 }
 
 type WorkerStatus struct {
@@ -55,6 +56,8 @@ func (e *Engine) Operations(ctx context.Context, p config.Principal, namespace s
 	if !canNamespace(p, namespace) {
 		return Operations{}, ErrForbidden
 	}
+	e.admission.RLock()
+	defer e.admission.RUnlock()
 	jobs, err := e.queries.JobSummary(ctx, q.JobSummaryParams{Namespace: namespace, Capabilities: p.Capabilities})
 	if err != nil {
 		return Operations{}, err
@@ -70,13 +73,20 @@ func (e *Engine) Operations(ctx context.Context, p config.Principal, namespace s
 	stat := e.db.Stat()
 	out := Operations{Activity: activity, Jobs: jobs, Draining: e.draining.Load(), Workers: make([]WorkerStatus, 0, len(workers)),
 		DBPressure: DBPressure{stat.TotalConns(), stat.AcquiredConns(), stat.MaxConns(), stat.EmptyAcquireCount()}}
+	out.NetworkPolicy = policyStatus(e.policy)
+	if e.policyUncertain {
+		out.NetworkPolicy.Status = "unavailable"
+	}
 	keys, profiles := e.visibleNetwork(p, namespace)
 	for _, w := range workers {
 		paths, err := decodePaths(w.NetworkPaths)
 		if err != nil {
 			return Operations{}, err
 		}
-		paths = slices.DeleteFunc(paths, func(a egress.Advertisement) bool { return !slices.Contains(profiles, a.Profile) })
+		paths = slices.DeleteFunc(paths, func(a egress.Advertisement) bool {
+			_, ok := routePath(e.route(a.Profile), a)
+			return !ok || !slices.Contains(profiles, a.Profile)
+		})
 		out.Workers = append(out.Workers, WorkerStatus{w.ID, w.Capacity, w.LastSeen, w.Draining, paths})
 	}
 	if len(keys) > 0 {
@@ -144,6 +154,8 @@ func (e *Engine) JobWaitingReason(ctx context.Context, job q.HarvestJob) (string
 		return "target_archived", nil
 	}
 	if cap, ok := e.Registry.Capability(job.Capability); ok && cap.Network != nil {
+		e.admission.RLock()
+		defer e.admission.RUnlock()
 		return e.networkWaiting(ctx, job, cap)
 	}
 	names := e.workerPrincipals(job.Namespace, []string{job.Capability})
@@ -161,13 +173,28 @@ func (e *Engine) WorkerReadiness(p config.Principal) error {
 	if e.draining.Load() {
 		return ErrDraining
 	}
-	if !slices.ContainsFunc(p.Capabilities, func(name string) bool {
+	e.admission.RLock()
+	defer e.admission.RUnlock()
+	var networkOffer bool
+	for _, name := range p.Capabilities {
 		cap, ok := e.Registry.Capability(name)
-		return ok && cap.Execute != nil
-	}) {
-		return ErrUnsupported
+		if !ok || cap.Execute == nil {
+			continue
+		}
+		if cap.Network == nil {
+			return nil
+		}
+		networkOffer = true
+		if !e.policyUncertain && slices.ContainsFunc(e.network.Sources, func(s egress.SourceConfig) bool {
+			return s.Capability == name && canNamespace(p, s.Namespace) && slices.Contains(p.EgressProfiles, s.Profile)
+		}) {
+			return nil
+		}
 	}
-	return nil
+	if networkOffer {
+		return ErrPolicyUnavailable
+	}
+	return ErrUnsupported
 }
 
 func (e *Engine) ValidateLocalWorker(p config.Principal, w config.Worker) error {

@@ -15,6 +15,7 @@ import (
 
 	"github.com/librecosta/harvest/internal/config"
 	"github.com/librecosta/harvest/internal/database"
+	"github.com/librecosta/harvest/internal/execution"
 	"github.com/librecosta/harvest/internal/localrun"
 	"github.com/librecosta/harvest/internal/provider"
 	"github.com/librecosta/harvest/internal/server"
@@ -129,6 +130,32 @@ func rootCommand(registry *provider.Registry, logger *slog.Logger) *cobra.Comman
 			return err
 		},
 	}
-	root.AddCommand(serve, workerCmd, health, migrate, stop)
+	policy := &cobra.Command{Use: "policy", Short: "Initialize the database-owned operational policy"}
+	policy.AddCommand(&cobra.Command{
+		Use: "init", Short: "Import the legacy server network block once", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfg, err := config.Load(path)
+			if err != nil {
+				return err
+			}
+			ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Second)
+			defer cancel()
+			pool, err := database.Open(ctx, cfg.Database)
+			if err != nil {
+				return err
+			}
+			defer pool.Close()
+			if err := database.CheckSchema(ctx, pool); err != nil {
+				return err
+			}
+			engine := execution.New(pool, registry, cfg.Principals, cfg.Retention)
+			if err := engine.InitNetworkPolicy(ctx, cfg.Network); err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), "Initialized network policy revision 1.")
+			return err
+		},
+	})
+	root.AddCommand(serve, workerCmd, health, migrate, stop, policy)
 	return root
 }
