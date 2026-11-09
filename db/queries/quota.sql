@@ -41,8 +41,11 @@ WHERE key = ANY(sqlc.arg(keys)::text[]) AND cooldown_until > statement_timestamp
 UPDATE harvest.quota_buckets SET deferred = deferred + 1 WHERE key = ANY(sqlc.arg(keys)::text[]);
 
 -- name: InsertQuotaPermit :exec
-INSERT INTO harvest.quota_permits (id, attempt_id, operation_id, request_hash, bucket_keys, account_key, max_bytes, expires_at, web_hop, previous_permit)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, sqlc.narg(web_hop), sqlc.narg(previous_permit));
+INSERT INTO harvest.quota_permits (id, attempt_id, operation_id, request_hash, bucket_keys, account_key, max_bytes, expires_at, web_hop, previous_permit, rdap_stage, rdap_endpoint)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, sqlc.narg(web_hop), sqlc.narg(previous_permit), sqlc.arg(rdap_stage), sqlc.arg(rdap_endpoint));
+
+-- name: HasRDAPStage :one
+SELECT EXISTS (SELECT 1 FROM harvest.quota_permits WHERE attempt_id = $1 AND rdap_stage = $2 AND rdap_stage <> 0);
 
 -- name: WebRedirectHop :one
 SELECT (parent.web_hop + 1)::smallint AS hop FROM harvest.quota_permits parent

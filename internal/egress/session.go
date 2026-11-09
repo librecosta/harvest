@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json/jsontext"
 	"errors"
 	"io"
 	"mime"
@@ -34,6 +35,7 @@ type Intent struct {
 	Destination string    `json:"destination,omitempty"`
 	RequestURI  string    `json:"request_uri,omitempty"`
 	Previous    uuid.UUID `json:"previous_permit,omitzero"`
+	RDAPStage   int16     `json:"rdap_stage,omitempty"`
 }
 
 type Grant struct {
@@ -41,14 +43,17 @@ type Grant struct {
 	LeaseMS   int64     `json:"lease_ms"`
 	ExpiresAt time.Time `json:"expires_at,omitzero"`
 	RetryMS   int64     `json:"retry_ms,omitempty"`
+	Endpoint  string    `json:"endpoint,omitempty"`
 }
 
 type Usage struct {
-	Outcome         string `json:"outcome"`
-	Bytes           int64  `json:"bytes"`
-	LatencyMS       int64  `json:"latency_ms"`
-	ThrottleSeconds int32  `json:"throttle_seconds,omitempty"`
-	RedirectDigest  string `json:"redirect_digest,omitempty"`
+	Outcome          string         `json:"outcome"`
+	Bytes            int64          `json:"bytes"`
+	LatencyMS        int64          `json:"latency_ms"`
+	ThrottleSeconds  int32          `json:"throttle_seconds,omitempty"`
+	RedirectDigest   string         `json:"redirect_digest,omitempty"`
+	BootstrapAttempt bool           `json:"bootstrap_attempt,omitempty"`
+	Bootstrap        jsontext.Value `json:"bootstrap,omitzero"`
 }
 
 type Gate interface {
@@ -76,6 +81,7 @@ type Session struct {
 type WebDestination struct {
 	ID     uuid.UUID
 	Origin string
+	Path   string
 }
 
 type responseContextKey struct{}
@@ -136,9 +142,12 @@ func (c scopedClient) Do(r *http.Request) (*http.Response, error) {
 		return nil, ErrPolicy
 	}
 	s := c.session
+	if s.source.RDAP {
+		return nil, ErrPolicy
+	}
 	if s.source.WebMethod != "" {
 		if !s.source.WebTarget(s.target.Origin) || !s.source.webURL(r.URL, s.target.Origin) ||
-			r.Method != s.source.WebMethod || r.URL.RequestURI() != "/" || r.Response != nil {
+			r.Method != s.source.WebMethod || r.URL.RequestURI() != s.firstPath() || r.Response != nil {
 			return nil, ErrPolicy
 		}
 		return s.webDo(r)
@@ -151,7 +160,7 @@ func (c scopedClient) Do(r *http.Request) (*http.Response, error) {
 }
 
 func safeError(err error) error {
-	for _, safe := range []error{ErrPolicy, ErrBudget, ErrDeferred, ErrUnavailable, ErrResponse, ErrTLSName, ErrTLSExpired, ErrTLSUntrusted, ErrTLSVerify, ErrProxy, context.Canceled, context.DeadlineExceeded} {
+	for _, safe := range []error{ErrPolicy, ErrBudget, ErrDeferred, ErrUnavailable, ErrResponse, ErrRobotsUnknown, ErrRobotsBlocked, ErrCandidate, ErrBootstrapRequired, ErrBootstrapReady, ErrBootstrapUnavailable, ErrRegistryMissing, ErrTLSName, ErrTLSExpired, ErrTLSUntrusted, ErrTLSVerify, ErrProxy, context.Canceled, context.DeadlineExceeded} {
 		if errors.Is(err, safe) {
 			return safe
 		}
@@ -172,7 +181,11 @@ func (s *Session) RoundTrip(r *http.Request) (*http.Response, error) {
 		r = r.Clone(r.Context())
 		r.Method = http.MethodGet
 	}
+	stage, _ := r.Context().Value(rdapStageKey{}).(int16)
 	origin := s.source.Origin(r.URL)
+	if s.source.RDAP && (stage == RDAPBootstrap || stage == RDAPLookup) && r.URL.String() == BootstrapURL && r.Method == http.MethodGet {
+		origin = 0
+	}
 	if s.source.WebMethod != "" && s.source.webURL(r.URL, s.target.Origin) && WebRequestURI(r.URL.RequestURI()) {
 		origin = 0
 	}
@@ -190,7 +203,7 @@ func (s *Session) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 	headerBytes := 0
 	for k, values := range r.Header {
-		if !allowedHeader(k) || (s.source.WebMethod != "" && !slices.Contains([]string{"accept", "accept-language", "user-agent"}, strings.ToLower(k))) {
+		if !allowedHeader(k) || ((s.source.WebMethod != "" || s.source.RDAP) && !slices.Contains([]string{"accept", "accept-language", "user-agent"}, strings.ToLower(k))) {
 			return nil, ErrPolicy
 		}
 		for _, value := range values {
@@ -222,6 +235,9 @@ func (s *Session) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 	// Reserve the accepted body limit plus bounded application HTTP metadata.
 	requestBytes := int64(headerBytes + len(r.URL.RequestURI()) + len(r.URL.Host) + 256)
+	if stage == RDAPLookup {
+		requestBytes += 800 // Reserve the bounded registry URL before it is known.
+	}
 	wireBudget := requestBytes + s.source.MaxBodyBytes + responseHeaderLimit
 	var excluded []string
 	for range 3 {
@@ -235,7 +251,7 @@ func (s *Session) RoundTrip(r *http.Request) (*http.Response, error) {
 			cleanup()
 			return nil, err
 		}
-		res, err := s.send(ctx, r, path, origin, requestBytes, cleanup)
+		res, err := s.send(ctx, r, path, origin, stage, requestBytes, cleanup)
 		if err == nil {
 			return res, nil
 		}
@@ -254,7 +270,7 @@ func (s *Session) RoundTrip(r *http.Request) (*http.Response, error) {
 	return nil, ErrUnavailable
 }
 
-func (s *Session) send(ctx context.Context, r *http.Request, path reservation, origin int, requestBytes int64, cleanup func()) (*http.Response, error) {
+func (s *Session) send(ctx context.Context, r *http.Request, path reservation, origin int, stage int16, requestBytes int64, cleanup func()) (*http.Response, error) {
 	intent := Intent{
 		OperationID: uuid.NewV7(), Profile: s.plan.Profile, PathID: path.path.ID, Origin: origin,
 		Method: r.Method, MaxBytes: s.source.MaxBodyBytes,
@@ -262,10 +278,13 @@ func (s *Session) send(ctx context.Context, r *http.Request, path reservation, o
 	if s.source.WebMethod != "" {
 		intent.TargetID, intent.Destination, intent.RequestURI = s.target.ID, s.target.Origin, r.URL.RequestURI()
 		intent.Previous = responseRoute(r.Response).permit
-		if intent.Previous == (uuid.UUID{}) && intent.RequestURI != "/" {
+		if intent.Previous == (uuid.UUID{}) && intent.RequestURI != s.firstPath() {
 			s.pool.release(path, 0, nil, false)
 			return nil, ErrPolicy
 		}
+	}
+	if stage != 0 {
+		intent.TargetID, intent.RDAPStage = s.target.ID, stage
 	}
 	grant, start, err := s.acquire(ctx, intent)
 	if err != nil || grant.RetryMS != 0 {
@@ -285,6 +304,7 @@ func (s *Session) send(ctx context.Context, r *http.Request, path reservation, o
 	var metadataBytes int64
 	finish := func(u Usage, networkErr error, reached bool) {
 		cancel()
+		u.BootstrapAttempt = stage == RDAPBootstrap
 		u.LatencyMS = min(MaxPermitTime.Milliseconds(), time.Since(start).Milliseconds())
 		s.pool.release(path, min(path.maxBytes, metadataBytes+u.Bytes), networkErr, reached)
 		s.gate.Finish(context.WithoutCancel(ctx), grant.ID, u)
@@ -294,6 +314,16 @@ func (s *Session) send(ctx context.Context, r *http.Request, path reservation, o
 		return nil, ErrUnavailable
 	}
 	metadataBytes = requestBytes
+	if stage == RDAPLookup {
+		domain, err := RegistrableDomain(s.target.Origin)
+		endpoint, endpointErr := RegistryEndpoint(grant.Endpoint, domain)
+		if err != nil || endpointErr != nil {
+			finish(Usage{Outcome: "policy"}, nil, false)
+			return nil, ErrPolicy
+		}
+		r = r.Clone(r.Context())
+		r.URL, r.Host = endpoint, ""
+	}
 	request := r.Clone(wire)
 	// HTTP/1's automatic replay requires either an absent body or GetBody.
 	// This EOF-only body is omitted from the wire for GET/HEAD, but prevents
@@ -307,7 +337,7 @@ func (s *Session) send(ctx context.Context, r *http.Request, path reservation, o
 		if wireErr := ctx.Err(); wireErr != nil {
 			return nil, wireErr
 		}
-		if s.source.WebMethod != "" {
+		if s.source.WebMethod != "" || s.source.RDAP {
 			var verify *tls.CertificateVerificationError
 			if errors.As(err, &verify) {
 				var invalid x509.CertificateInvalidError
@@ -328,7 +358,7 @@ func (s *Session) send(ctx context.Context, r *http.Request, path reservation, o
 				return nil, ErrProxy
 			}
 		}
-		if s.source.WebMethod != "" || s.source.FixedPath != "" {
+		if s.source.WebMethod != "" || s.source.FixedPath != "" || s.source.RDAP {
 			var timeout net.Error
 			if errors.Is(wireErr, context.DeadlineExceeded) || (errors.As(err, &timeout) && timeout.Timeout()) {
 				return nil, context.DeadlineExceeded
@@ -365,7 +395,31 @@ func (s *Session) send(ctx context.Context, r *http.Request, path reservation, o
 		return res, nil
 	}
 	kind, _, _ := mime.ParseMediaType(res.Header.Get("Content-Type"))
-	if s.source.WebMethod == "" && (res.StatusCode < 200 || res.ContentLength > s.source.MaxBodyBytes ||
+	if stage == RDAPBootstrap && res.StatusCode == http.StatusOK {
+		if kind != "application/json" {
+			_ = res.Body.Close()
+			finish(Usage{Outcome: "policy"}, nil, true)
+			return nil, ErrBootstrapUnavailable
+		}
+		body := &responseBody{inner: res.Body, ctx: wire, limit: RDAPMaxBytes, status: outcome, finish: func(usage Usage) {}}
+		res.Body = body
+		data, err := ReadBounded(res, RDAPMaxBytes, false)
+		_ = body.Close()
+		res.Body = http.NoBody
+		usage := Usage{Outcome: outcome, Bytes: body.read.Load()}
+		if err == nil && jsontext.Value(data).IsValid() {
+			usage.Bootstrap = data
+		} else {
+			usage.Outcome = "policy"
+		}
+		finish(usage, nil, true)
+		cleanup()
+		if usage.Bootstrap == nil {
+			return nil, ErrBootstrapUnavailable
+		}
+		return res, nil
+	}
+	if s.source.WebMethod == "" && !s.source.RDAP && (res.StatusCode < 200 || res.ContentLength > s.source.MaxBodyBytes ||
 		(res.StatusCode >= 200 && res.StatusCode < 300 && res.StatusCode != 204 && r.Method != http.MethodHead &&
 			!slices.Contains(s.source.ContentTypes, kind)) || res.Header.Get("Content-Encoding") != "") {
 		res.Body.Close()
@@ -380,7 +434,7 @@ func (s *Session) send(ctx context.Context, r *http.Request, path reservation, o
 	}
 	s.calls.Add(1)
 	body := &responseBody{
-		inner: res.Body, limit: s.source.MaxBodyBytes, status: outcome,
+		inner: res.Body, ctx: wire, limit: s.source.MaxBodyBytes, status: outcome,
 		finish: func(usage Usage) {
 			defer s.calls.Done()
 			defer cleanup()
@@ -443,6 +497,7 @@ func classify(status int) string {
 
 type responseBody struct {
 	inner    io.ReadCloser
+	ctx      context.Context
 	limit    int64
 	status   string
 	readMu   sync.Mutex
@@ -469,8 +524,11 @@ func (b *responseBody) Read(p []byte) (int, error) {
 	if err == io.EOF {
 		b.done(b.status)
 	} else if err != nil {
-		b.timeout()
 		err = ErrUnavailable
+		if b.ctx != nil && b.ctx.Err() != nil {
+			err = b.ctx.Err()
+		}
+		b.timeout()
 	}
 	return n, err
 }

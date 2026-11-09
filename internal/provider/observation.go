@@ -37,13 +37,14 @@ type ObservationPolicy struct {
 	Scopes        func(Task) []SegmentScope
 	NormalizeData func(state string, data jsontext.Value) (jsontext.Value, error)
 	// NormalizeScopedData returns the persisted data and its semantic projection.
-	NormalizeScopedData func(Task, SegmentScope, string, jsontext.Value) (data, semantic jsontext.Value, err error)
-	DiagnosticEvidence  []string
-	Source              string
-	EmptyEvidence       string
-	WithdrawEvidence    string
-	MaxDataBytes        int
-	Sample              bool
+	NormalizeScopedData     func(Task, SegmentScope, string, jsontext.Value) (data, semantic jsontext.Value, err error)
+	NormalizeDiagnosticData func(string, jsontext.Value) (jsontext.Value, error)
+	DiagnosticEvidence      []string
+	Source                  string
+	EmptyEvidence           string
+	WithdrawEvidence        string
+	MaxDataBytes            int
+	Sample                  bool
 }
 
 func (p *ObservationPolicy) valid() bool {

@@ -23,17 +23,19 @@ type linkedEntity struct {
 }
 
 type pageFacts struct {
-	Title       string            `json:"title,omitempty"`
-	Description string            `json:"description,omitempty"`
-	Language    string            `json:"language,omitempty"`
-	Canonical   string            `json:"canonical,omitempty"`
-	OpenGraph   map[string]string `json:"open_graph,omitempty"`
-	Twitter     map[string]string `json:"twitter,omitempty"`
-	Icons       []string          `json:"icons,omitempty"`
-	Manifest    string            `json:"manifest,omitempty"`
-	LinkedData  []linkedEntity    `json:"json_ld,omitempty"`
-	Ruleset     string            `json:"ruleset_version"`
-	Technology  []technology      `json:"technology,omitempty"`
+	Title           string            `json:"title,omitempty"`
+	Description     string            `json:"description,omitempty"`
+	Language        string            `json:"language,omitempty"`
+	Canonical       string            `json:"canonical,omitempty"`
+	OpenGraph       map[string]string `json:"open_graph,omitempty"`
+	Twitter         map[string]string `json:"twitter,omitempty"`
+	Icons           []string          `json:"icons,omitempty"`
+	Manifest        string            `json:"manifest,omitempty"`
+	LinkedData      []linkedEntity    `json:"json_ld,omitempty"`
+	Ruleset         string            `json:"ruleset_version"`
+	Technology      []technology      `json:"technology,omitempty"`
+	Feeds           []feedHint        `json:"feeds,omitempty"`
+	AssetCandidates []assetHint       `json:"asset_candidates,omitempty"`
 }
 
 type pageEvidence struct {
@@ -73,12 +75,14 @@ func parsePage(body []byte, contentType string, base *url.URL, signals webSignal
 	z.SetMaxBuf(64 << 10)
 	var title, linked, bodyStarted bool
 	var doc bool
+	var hints homepageLinks
 	for range 25000 {
 		switch z.Next() {
 		case html.ErrorToken:
 			if z.Err() != io.EOF || !doc {
 				return pageEvidence{}, errors.New("HTML cannot be interpreted within bounds")
 			}
+			hints.apply(&out, base)
 			out.Icons = sortedUnique(out.Icons)
 			out.Technology = identify(signals)
 			return pageEvidence{out, pageHash(out)}, nil
@@ -99,7 +103,7 @@ func parsePage(body []byte, contentType string, base *url.URL, signals webSignal
 			case "astro-island":
 				signals["marker:astro-island"] = true
 				continue
-			case "html", "meta", "script", "link":
+			case "html", "meta", "script", "link", "base":
 			default:
 				continue
 			}
@@ -109,7 +113,7 @@ func parsePage(body []byte, contentType string, base *url.URL, signals webSignal
 			for attrs {
 				key, value, more := z.TagAttr()
 				switch k := string(key); k {
-				case "name", "content", "property", "rel", "href", "src", "id", "type", "lang", "xml:lang", "data-template":
+				case "name", "content", "property", "rel", "href", "src", "id", "type", "lang", "xml:lang", "data-template", "title", "sizes":
 					if _, exists := values[k]; !exists && len(value) <= 2048 {
 						values[k] = string(value)
 					}
@@ -140,9 +144,14 @@ func parsePage(body []byte, contentType string, base *url.URL, signals webSignal
 					}
 				}
 				signals.asset(base, values["src"])
+			case "base":
+				if !bodyStarted {
+					hints.readBase(base, values["href"])
+				}
 			case "link":
 				if !bodyStarted {
 					pageLink(&out, base, values)
+					hints.readLink(values)
 				}
 				for rel := range strings.FieldsSeq(strings.ToLower(values["rel"])) {
 					if rel == "stylesheet" || rel == "modulepreload" || rel == "preload" {
@@ -293,7 +302,7 @@ func pageHash(v pageFacts) string {
 	return hashWeb(data)
 }
 
-func normalizeHTML(state string, value jsontext.Value) (jsontext.Value, jsontext.Value, error) {
+func normalizeHTML(task Task, state string, value jsontext.Value) (jsontext.Value, jsontext.Value, error) {
 	v, err := ObservationObject[pageEvidence](value)
 	valid := err == nil && state == "present" && validText(v.Title, 512) && validText(v.Description, 1024) &&
 		validText(v.Language, 35) && v.Canonical == pageURL(nil, v.Canonical) && v.Manifest == pageURL(nil, v.Manifest) &&
@@ -315,6 +324,15 @@ func normalizeHTML(state string, value jsontext.Value) (jsontext.Value, jsontext
 	for _, item := range v.LinkedData {
 		valid = valid && (item.Kind == "WebSite" || item.Kind == "Organization") &&
 			validText(item.Name, 256) && validText(item.Description, 512) && item.URL == pageURL(nil, item.URL)
+	}
+	valid = valid && len(v.Feeds) <= 4 && len(v.AssetCandidates) <= 5
+	for _, f := range v.Feeds {
+		valid = valid && f.URL != "" && f.URL == pageURL(nil, f.URL) && feedType(f.MIME) &&
+			f.Source == "html_alternate" && f.Status == "discovered" && !f.Verified && validText(f.Title, 128)
+	}
+	for _, a := range v.AssetCandidates {
+		valid = valid && a.URL != "" && a.URL == pageURL(nil, a.URL) && (a.Kind == "icon" || a.Kind == "manifest") &&
+			(!a.Fetchable || approvedAsset(task.ExternalKey, a)) && slices.Equal(a.Sizes, parseSizes(strings.Join(a.Sizes, " ")))
 	}
 	return webData(valid && v.SemanticSHA256 == pageHash(v.pageFacts), v, v.pageFacts)
 }

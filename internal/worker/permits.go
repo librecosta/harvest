@@ -37,6 +37,12 @@ func (g permitGate) Acquire(ctx context.Context, in egress.Intent) (egress.Grant
 		if responseCode(err, "network_budget_exhausted") {
 			return egress.Grant{}, egress.ErrBudget
 		}
+		for _, failure := range []error{egress.ErrRobotsUnknown, egress.ErrRobotsBlocked, egress.ErrCandidate,
+			egress.ErrBootstrapRequired, egress.ErrBootstrapReady, egress.ErrBootstrapUnavailable, egress.ErrRegistryMissing} {
+			if responseCode(err, failure.Error()) {
+				return egress.Grant{}, failure
+			}
+		}
 		if responseCode(err, "forbidden") {
 			return egress.Grant{}, egress.ErrPolicy
 		}

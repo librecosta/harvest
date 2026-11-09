@@ -34,7 +34,7 @@ var webDiagnostics = []string{
 // WebManifest uses a fixed resolver and the OS trust store in production.
 // Only the integration binary supplies a fixture network.
 func WebManifest(fixture *egress.FixtureNetwork) Manifest {
-	return Manifest{
+	manifest := Manifest{
 		Name:      "web",
 		Resources: []Resource{{"domain", domain}, {"origin", origin}},
 		Capabilities: []Capability{
@@ -65,6 +65,8 @@ func WebManifest(fixture *egress.FixtureNetwork) Manifest {
 			},
 		},
 	}
+	manifest.Capabilities = append(manifest.Capabilities, discoveryCapabilities(fixture)...)
+	return manifest
 }
 
 func webPolicy(scopes func(Task) []SegmentScope, empty string) *ObservationPolicy {
@@ -182,7 +184,7 @@ func normalizeWebData(task Task, scope SegmentScope, state string, value jsontex
 	case "http":
 		return normalizeHTTP(task, state, value)
 	case "html":
-		return normalizeHTML(state, value)
+		return normalizeHTML(task, state, value)
 	case "tls":
 		return normalizeTLS(task, state, value)
 	case "dns":

@@ -48,7 +48,7 @@ func upgradeA3(t *testing.T, p *testPlane) (uuid.UUID, execution.PermitFinish) {
 	a3Exec(t, p, `INSERT INTO harvest.change_events (stream,position,id,action,target_id,capability,output_schema,scope_key,observation_id,committed_at,stored_bytes)
 		VALUES ('scheduler',1,$1,'upsert',$2,'fixture.detail',1,repeat('0',64),$3,now(),1024)`, uuid.NewV7(), target, observation)
 	expectFailure(t, p.scratch, nil, p.bin, "schema is unavailable or incompatible", "fixture", "serve", "--local", "--config", p.config)
-	if got := p.cli("migrate", "up", "--config", p.config); got != "Applied 2 Harvest migrations." {
+	if got := p.cli("migrate", "up", "--config", p.config); got != "Applied 3 Harvest migrations." {
 		t.Fatal(got)
 	}
 	if n := a3Count(t, p, `SELECT count(*) FROM harvest.targets t JOIN harvest.jobs j ON j.target_id=t.id

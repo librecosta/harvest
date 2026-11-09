@@ -61,7 +61,11 @@ func ProxyKind(s string) bool { return s == "http" || s == "https" || s == "sock
 // Fixture is set only by the integration test registry.
 type Source struct {
 	Origins        []string
-	WebMethod      string // GET for homepage or HEAD for HTTPS certificate evidence.
+	WebMethod      string // GET for Web acquisition or HEAD for HTTPS certificate evidence.
+	WebPath        string // Empty means the registered origin root.
+	Candidate      bool   // An immutable homepage Observation can authorize the first path.
+	Robots         bool   // The control plane checks current Robots policy before issuing a permit.
+	RDAP           bool
 	FixedPath      string // Exact fixed-source path. Redirects are disabled.
 	FixtureNetwork *FixtureNetwork
 	AllowDirect    bool
@@ -78,9 +82,17 @@ func (s Source) Valid() bool {
 		s.MaxBodyBytes < 1 || s.MaxBodyBytes > 2<<20 || len(s.ContentTypes) < 1 || len(s.ContentTypes) > 8 {
 		return false
 	}
+	if s.RDAP {
+		return s.WebMethod == "" && s.WebPath == "" && !s.Candidate && !s.Robots && len(s.Origins) == 0 &&
+			s.FixedPath == "" && !s.Fixture && !s.Replay && s.MaxRequests == 2 && s.MaxBodyBytes == RDAPMaxBytes
+	}
 	if s.WebMethod != "" {
-		return len(s.Origins) == 0 && s.FixedPath == "" && !s.Fixture && !s.Replay &&
-			(s.WebMethod == "GET" || s.WebMethod == "HEAD")
+		return len(s.Origins) == 0 && s.FixedPath == "" && !s.Fixture && !s.Replay && s.MaxRequests <= 4 &&
+			(s.WebMethod == "GET" && (s.WebPath == "" || DiscoveryPath(s.WebPath)) && (!s.Candidate || s.Robots) ||
+				s.WebMethod == "HEAD" && s.WebPath == "" && !s.Candidate && !s.Robots && s.MaxRequests == 1)
+	}
+	if s.WebPath != "" || s.Candidate || s.Robots {
+		return false
 	}
 	if len(s.Origins) == 0 || (s.FixedPath != "" && !WebRequestURI(s.FixedPath)) {
 		return false

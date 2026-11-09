@@ -71,7 +71,7 @@ func (s *Session) webDo(r *http.Request) (*http.Response, error) {
 		if err != nil {
 			return nil, safeError(err)
 		}
-		if hop == MaxWebRedirects || !redirectStatus(res.StatusCode) {
+		if hop >= int(s.source.MaxRequests)-1 || !redirectStatus(res.StatusCode) {
 			return res, nil
 		}
 		next, err := res.Location()
@@ -85,6 +85,21 @@ func (s *Session) webDo(r *http.Request) (*http.Response, error) {
 	}
 }
 
+func (s *Session) firstPath() string {
+	if s.source.Candidate && s.target.Path != "" {
+		return s.target.Path
+	}
+	return s.source.InitialPath()
+}
+
+func (s Source) InitialPath() string {
+	if s.WebPath == "" {
+		return "/"
+	}
+	return s.WebPath
+}
+
 func (s *Session) webRedirect(u *url.URL) bool {
-	return s.source.WebMethod == http.MethodGet && s.source.webURL(u, s.target.Origin) && WebRequestURI(u.RequestURI())
+	return s.source.WebMethod == http.MethodGet && s.source.webURL(u, s.target.Origin) &&
+		WebRequestURI(u.RequestURI()) && (s.source.WebPath == "" || DiscoveryPath(u.RequestURI()))
 }

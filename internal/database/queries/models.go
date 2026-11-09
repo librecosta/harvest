@@ -176,6 +176,8 @@ type HarvestQuotaPermit struct {
 	WebHop         *int16     `json:"web_hop"`
 	PreviousPermit *uuid.UUID `json:"previous_permit"`
 	RedirectDigest string     `json:"redirect_digest"`
+	RdapStage      int16      `json:"rdap_stage"`
+	RdapEndpoint   string     `json:"rdap_endpoint"`
 }
 
 type HarvestSchedule struct {

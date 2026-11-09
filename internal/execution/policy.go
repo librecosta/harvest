@@ -96,6 +96,7 @@ func (e *Engine) validatePolicy(c egress.NetworkConfig) error {
 			return errors.New("network route has no configured Worker profile grant")
 		}
 	}
+	var rdapAccount string
 	for _, rule := range c.Sources {
 		cap, ok := e.Registry.Capability(rule.Capability)
 		if !ok || cap.Execute == nil || cap.Network == nil {
@@ -107,6 +108,13 @@ func (e *Engine) validatePolicy(c egress.NetworkConfig) error {
 			return errors.New("network source lacks a matching Worker grant")
 		}
 		r := c.Routes[slices.IndexFunc(c.Routes, func(r egress.RouteConfig) bool { return r.Profile == rule.Profile })]
+		if cap.Network.RDAP {
+			bucket := c.Quotas[slices.IndexFunc(c.Quotas, func(q egress.QuotaConfig) bool { return q.ID == rule.AccountBucket })]
+			if rdapAccount != "" && rdapAccount != bucket.ID || bucket.Burst > 4 || bucket.PerMinute > 60 || bucket.Concurrency > 2 {
+				return errors.New("RDAP requires one shared low-rate account bucket")
+			}
+			rdapAccount = bucket.ID
+		}
 		if (r.Mode == egress.Direct || r.AllowDirect) && !cap.Network.AllowDirect {
 			return errors.New("network route exceeds compiled direct allowance")
 		}

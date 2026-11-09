@@ -66,8 +66,11 @@ func (c client) request(ctx context.Context, method, path string, in, out any) (
 		var err error
 		payload, err = json.Marshal(in)
 		limit := execution.MaxBodySize
-		if _, ok := in.(execution.Completion); ok {
+		switch in.(type) {
+		case execution.Completion:
 			limit = provider.MaxCompletionBody
+		case execution.PermitFinish:
+			limit = execution.MaxPermitFinishBody
 		}
 		if err != nil || len(payload) > limit {
 			return false, responseError{status: 400}

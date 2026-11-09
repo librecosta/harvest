@@ -108,6 +108,37 @@ func (q *Queries) CurrentResultPage(ctx context.Context, arg CurrentResultPagePa
 	return items, nil
 }
 
+const currentRobotsPolicy = `-- name: CurrentRobotsPolicy :one
+SELECT o.data FROM harvest.current_results c
+JOIN harvest.observations o ON o.id = c.observation_id
+WHERE c.stream = $1 AND c.target_id = $2 AND c.capability = 'web.robots'
+  AND c.output_schema = 1 AND c.scope_key = $3 AND c.confirmed_at >= statement_timestamp() - interval '8 days'
+  AND NOT EXISTS (
+    SELECT 1 FROM harvest.jobs j WHERE j.namespace = c.stream AND j.target_id = c.target_id
+      AND j.capability = 'web.robots' AND j.scope = $4::jsonb
+      AND j.state NOT IN ('succeeded', 'queued') AND j.updated_at > c.confirmed_at
+  )
+`
+
+type CurrentRobotsPolicyParams struct {
+	Stream   string    `json:"stream"`
+	TargetID uuid.UUID `json:"target_id"`
+	ScopeKey string    `json:"scope_key"`
+	JobScope []byte    `json:"job_scope"`
+}
+
+func (q *Queries) CurrentRobotsPolicy(ctx context.Context, arg CurrentRobotsPolicyParams) ([]byte, error) {
+	row := q.db.QueryRow(ctx, currentRobotsPolicy,
+		arg.Stream,
+		arg.TargetID,
+		arg.ScopeKey,
+		arg.JobScope,
+	)
+	var data []byte
+	err := row.Scan(&data)
+	return data, err
+}
+
 const deleteCurrentResult = `-- name: DeleteCurrentResult :exec
 DELETE FROM harvest.current_results
 WHERE stream = $1 AND target_id = $2 AND capability = $3 AND output_schema = $4 AND scope_key = $5

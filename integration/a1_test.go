@@ -298,8 +298,8 @@ func testRegistryAndAuth(t *testing.T, p *testPlane) (uuid.UUID, uuid.UUID) {
 			}
 		}
 	}
-	if executable != 4 {
-		t.Fatal("expected the fixture and three compiled Web offers")
+	if executable != 8 {
+		t.Fatal("expected the fixture and seven compiled Web offers")
 	}
 	steam := p.register("steam", "app", "000570", "public")
 	if p.register("steam", "app", "570", "public") != steam {

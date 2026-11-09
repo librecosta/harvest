@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	json "encoding/json/v2"
 	"errors"
 	"net/http"
 	"slices"
@@ -16,7 +15,6 @@ import (
 	"github.com/librecosta/harvest/internal/config"
 	q "github.com/librecosta/harvest/internal/database/queries"
 	"github.com/librecosta/harvest/internal/egress"
-	"github.com/librecosta/harvest/internal/provider"
 )
 
 const unitsPerToken = int64(time.Minute / time.Microsecond)
@@ -33,7 +31,7 @@ type PermitFinish struct {
 }
 
 func (e *Engine) Permit(ctx context.Context, p config.Principal, id uuid.UUID, in PermitRequest) (egress.Grant, error) {
-	if !UUIDv7(in.OperationID) || in.Origin < 0 || in.MaxBytes < 1 || (in.Method != http.MethodGet && in.Method != http.MethodHead) {
+	if !UUIDv7(in.OperationID) || in.Origin < 0 || in.RDAPStage < 0 || in.RDAPStage > egress.RDAPLookup || in.MaxBytes < 1 || (in.Method != http.MethodGet && in.Method != http.MethodHead) {
 		return egress.Grant{}, ErrInvalid
 	}
 	e.admission.RLock()
@@ -44,7 +42,11 @@ func (e *Engine) Permit(ctx context.Context, p config.Principal, id uuid.UUID, i
 	if e.policyUncertain {
 		return egress.Grant{}, ErrPolicyUnavailable
 	}
-	return tx(ctx, e, func(db *q.Queries) (egress.Grant, error) {
+	if in.RDAPStage != 0 {
+		e.rdap.mu.Lock()
+		defer e.rdap.mu.Unlock()
+	}
+	grant, err := tx(ctx, e, func(db *q.Queries) (egress.Grant, error) {
 		job, attempt, worker, err := lockAttempt(ctx, db, p, id, in.Fence)
 		if err != nil {
 			return egress.Grant{}, err
@@ -81,21 +83,42 @@ func (e *Engine) Permit(ctx context.Context, p config.Principal, id uuid.UUID, i
 		if replay && !bytes.Equal(old.RequestHash, hash) {
 			return egress.Grant{}, ErrConflict
 		}
+		scope, err := webJobScope(job)
+		if err != nil {
+			return egress.Grant{}, err
+		}
 		var hop *int16
-		if cap.Network.WebMethod != "" {
+		var registryDomain, endpoint string
+		switch {
+		case cap.Network.RDAP:
+			target, err := db.Target(ctx, q.TargetParams{ID: job.TargetID, Namespaces: []string{job.Namespace}})
+			if err != nil {
+				return egress.Grant{}, err
+			}
+			registryDomain, err = egress.RegistrableDomain(target.ExternalKey)
+			if err != nil || in.Origin != 0 || in.TargetID != target.ID || target.State != "active" || target.Provider != "web" ||
+				target.ResourceType != "domain" || in.Method != http.MethodGet || in.RDAPStage == 0 ||
+				in.Previous != (uuid.UUID{}) || in.Destination != "" || in.RequestURI != "" {
+				return egress.Grant{}, ErrForbidden
+			}
+		case cap.Network.WebMethod != "":
 			target, err := db.Target(ctx, q.TargetParams{ID: job.TargetID, Namespaces: []string{job.Namespace}})
 			if err != nil {
 				return egress.Grant{}, err
 			}
 			if in.Origin != 0 || in.TargetID != target.ID || in.Destination != target.ExternalKey ||
 				target.Provider != "web" || target.ResourceType != cap.Resource || target.State != "active" ||
-				in.Method != cap.Network.WebMethod || !cap.Network.WebTarget(target.ExternalKey) ||
-				!egress.WebRequestURI(in.RequestURI) {
+				in.Method != cap.Network.WebMethod || in.RDAPStage != 0 || !cap.Network.WebTarget(target.ExternalKey) ||
+				!egress.WebRequestURI(in.RequestURI) || cap.Network.WebPath != "" && !egress.DiscoveryPath(in.RequestURI) {
 				return egress.Grant{}, ErrForbidden
 			}
 			switch {
 			case in.Previous == (uuid.UUID{}):
-				if in.RequestURI != "/" {
+				path, err := approveFirstWebPath(ctx, db, job, target, cap.Network, scope)
+				if err != nil {
+					return egress.Grant{}, err
+				}
+				if in.RequestURI != path {
 					return egress.Grant{}, ErrForbidden
 				}
 				hop = new(int16)
@@ -111,19 +134,23 @@ func (e *Engine) Permit(ctx context.Context, p config.Principal, id uuid.UUID, i
 				if err != nil {
 					return egress.Grant{}, err
 				}
+				if int32(n) >= cap.Network.MaxRequests {
+					return egress.Grant{}, ErrQuotaBudget
+				}
 				hop = &n
 			}
-		} else if in.Origin >= len(cap.Network.Origins) || in.TargetID != (uuid.UUID{}) ||
-			in.Previous != (uuid.UUID{}) || in.Destination != "" || in.RequestURI != "" ||
-			cap.Network.FixedPath != "" && in.Method != http.MethodGet {
+			if cap.Network.Robots {
+				if err := authorizeRobots(ctx, db, job, scope, in.RequestURI); err != nil {
+					return egress.Grant{}, err
+				}
+			}
+		case in.Origin >= len(cap.Network.Origins) || in.TargetID != (uuid.UUID{}) ||
+			in.Previous != (uuid.UUID{}) || in.Destination != "" || in.RequestURI != "" || in.RDAPStage != 0 ||
+			cap.Network.FixedPath != "" && in.Method != http.MethodGet:
 			return egress.Grant{}, ErrForbidden
 		}
 		if in.MaxBytes != cap.Network.MaxBodyBytes {
 			return egress.Grant{}, ErrForbidden
-		}
-		var scope provider.Scope
-		if err := json.Unmarshal(job.Scope, &scope); err != nil {
-			return egress.Grant{}, err
 		}
 		rule := e.source(job.Capability, job.Namespace)
 		paths, err := decodePaths(worker.NetworkPaths)
@@ -143,11 +170,27 @@ func (e *Engine) Permit(ctx context.Context, p config.Principal, id uuid.UUID, i
 		}
 		path, _ := routePath(e.route(plan.Profile), plan.Paths[i])
 		if replay {
-			grant := egress.Grant{ID: old.ID, ExpiresAt: old.ExpiresAt.UTC()}
+			grant := egress.Grant{ID: old.ID, ExpiresAt: old.ExpiresAt.UTC(), Endpoint: old.RdapEndpoint}
 			if old.FinishedAt == nil && old.ExpiresAt.After(now) {
 				grant.LeaseMS = old.ExpiresAt.Sub(now).Milliseconds()
 			}
 			return grant, nil
+		}
+		if in.RDAPStage != 0 {
+			endpoint, err = e.rdap.authorize(in.RDAPStage, registryDomain)
+			if err != nil {
+				return egress.Grant{}, err
+			}
+			used, err := db.HasRDAPStage(ctx, q.HasRDAPStageParams{AttemptID: id, RdapStage: in.RDAPStage})
+			if err != nil {
+				return egress.Grant{}, err
+			}
+			if used {
+				return egress.Grant{}, ErrQuotaBudget
+			}
+			if in.RDAPStage == egress.RDAPBootstrap && time.Now().Before(e.rdap.leaderUntil) {
+				return egress.Grant{RetryMS: 250}, nil
+			}
 		}
 		used, err := db.CountAttemptPermits(ctx, id)
 		if err != nil {
@@ -197,10 +240,14 @@ func (e *Engine) Permit(ctx context.Context, p config.Principal, id uuid.UUID, i
 		err = db.InsertQuotaPermit(ctx, q.InsertQuotaPermitParams{
 			ID: permit, AttemptID: id, OperationID: in.OperationID, RequestHash: hash,
 			BucketKeys: keys, AccountKey: rule.AccountBucket, MaxBytes: in.MaxBytes, ExpiresAt: expires,
-			WebHop: hop, PreviousPermit: parent,
+			WebHop: hop, PreviousPermit: parent, RdapStage: in.RDAPStage, RdapEndpoint: endpoint,
 		})
-		return egress.Grant{ID: permit, ExpiresAt: expires.UTC(), LeaseMS: expires.Sub(now).Milliseconds()}, err
+		return egress.Grant{ID: permit, ExpiresAt: expires.UTC(), LeaseMS: expires.Sub(now).Milliseconds(), Endpoint: endpoint}, err
 	})
+	if err == nil && in.RDAPStage == egress.RDAPBootstrap && grant.LeaseMS > 0 && grant.ID != e.rdap.leader {
+		e.rdap.leader, e.rdap.leaderUntil = grant.ID, time.Now().Add(time.Duration(grant.LeaseMS)*time.Millisecond)
+	}
+	return grant, err
 }
 
 func keysInOrder(buckets []q.HarvestQuotaBucket) []string {
@@ -236,10 +283,22 @@ func (e *Engine) availableQuota(buckets []q.HarvestQuotaBucket, counts []q.Count
 	return balances, blocked, delay
 }
 
+const MaxPermitFinishBody = egress.RDAPMaxBytes + MaxBodySize
+
 func (e *Engine) FinishPermit(ctx context.Context, p config.Principal, id uuid.UUID, in PermitFinish) error {
 	if !UUIDv7(in.AttemptID) || !UUIDv7(in.JobID) || !UUIDv7(in.WorkerID) || in.Generation < 1 || in.Bytes < 0 || in.LatencyMS < 0 || in.LatencyMS > egress.MaxPermitTime.Milliseconds() ||
 		in.ThrottleSeconds < 0 || in.ThrottleSeconds > 300 || (in.Outcome != "throttled" && in.ThrottleSeconds != 0) {
 		return ErrInvalid
+	}
+	if len(in.Bootstrap) > egress.RDAPMaxBytes || len(in.Bootstrap) != 0 && (!in.BootstrapAttempt || in.Outcome != "success") ||
+		in.BootstrapAttempt && in.RedirectDigest != "" {
+		return ErrInvalid
+	}
+	var bootstrap egress.Bootstrap
+	if in.BootstrapAttempt {
+		bootstrap, _ = egress.ParseBootstrap(in.Bootstrap)
+		e.rdap.mu.Lock()
+		defer e.rdap.mu.Unlock()
 	}
 	if in.RedirectDigest != "" {
 		b, err := hex.DecodeString(in.RedirectDigest)
@@ -265,6 +324,7 @@ func (e *Engine) FinishPermit(ctx context.Context, p config.Principal, id uuid.U
 	if err != nil {
 		return err
 	}
+	var timelyBootstrap bool
 	_, err = tx(ctx, e, func(db *q.Queries) (struct{}, error) {
 		var zero struct{}
 		row, err := found(db.LockQuotaPermitForFinish(ctx, q.LockQuotaPermitForFinishParams{
@@ -273,10 +333,14 @@ func (e *Engine) FinishPermit(ctx context.Context, p config.Principal, id uuid.U
 		if err != nil {
 			return zero, err
 		}
+		if (row.RdapStage == egress.RDAPBootstrap) != in.BootstrapAttempt {
+			return zero, ErrInvalid
+		}
 		if row.FinishedAt != nil {
 			if !bytes.Equal(row.FinishHash, hash) {
 				return zero, ErrConflict
 			}
+			timelyBootstrap = in.BootstrapAttempt && row.FinishedAt.Before(row.ExpiresAt)
 			return zero, nil
 		}
 		if in.Bytes > row.MaxBytes || (in.RedirectDigest != "" && row.WebHop == nil) {
@@ -303,8 +367,19 @@ func (e *Engine) FinishPermit(ctx context.Context, p config.Principal, id uuid.U
 		}); err != nil {
 			return zero, err
 		}
+		timelyBootstrap = in.BootstrapAttempt && now.Before(row.ExpiresAt)
 		return zero, db.FinishQuotaPermit(ctx, q.FinishQuotaPermitParams{ID: id, FinishHash: hash, NowAt: now, RedirectDigest: in.RedirectDigest})
 	})
+	if err == nil && in.BootstrapAttempt && id == e.rdap.leader {
+		e.rdap.leader, e.rdap.leaderUntil = uuid.Nil(), time.Time{}
+		if timelyBootstrap && len(bootstrap) != 0 {
+			e.rdap.services = bootstrap
+			e.rdap.validUntil = time.Now().Add(24 * time.Hour)
+			e.rdap.retryAfter = time.Time{}
+		} else {
+			e.rdap.retryAfter = time.Now().Add(15 * time.Second)
+		}
+	}
 	return err
 }
 

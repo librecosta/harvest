@@ -12,6 +12,7 @@ import (
 
 	"github.com/librecosta/harvest/internal/config"
 	q "github.com/librecosta/harvest/internal/database/queries"
+	"github.com/librecosta/harvest/internal/egress"
 	"github.com/librecosta/harvest/internal/provider"
 )
 
@@ -89,6 +90,34 @@ func (e *Engine) resolve(ctx context.Context, db *q.Queries, p config.Principal,
 		return work{}, ErrUnsupported
 	}
 	in.Params = params
+	if cap.Network != nil && (cap.Network.WebPath != "" || cap.Network.RDAP) {
+		canonical, _, err := canonicalScope(provider.SegmentScope{Namespace: target.Namespace, Scope: in.Scope})
+		if err != nil {
+			return work{}, ErrInvalid
+		}
+		in.Scope = canonical.Scope
+		if cap.Network.RDAP {
+			if _, err := egress.RegistrableDomain(target.ExternalKey); err != nil {
+				return work{}, ErrInvalid
+			}
+		}
+		if cap.Network.Candidate {
+			selection, err := provider.Object[provider.AssetParams](params)
+			if err != nil {
+				return work{}, ErrInvalid
+			}
+			if selection.ObservationID != nil {
+				if !canCapability(p, "web.http") {
+					return work{}, ErrForbidden
+				}
+				_, _, err := assetPath(ctx, db, provider.Task{TargetID: target.ID, ExternalKey: target.ExternalKey,
+					Namespace: target.Namespace, Scope: in.Scope, Params: params})
+				if err != nil {
+					return work{}, err
+				}
+			}
+		}
+	}
 	scope, err := json.Marshal(in.Scope)
 	if err != nil {
 		return work{}, err

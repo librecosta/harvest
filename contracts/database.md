@@ -43,12 +43,24 @@ another debit. Closing or expiring a permit releases only concurrency.
 Active counts ignore expired permits even before cleanup.
 
 For a dynamic Web permit the Job lock also serializes validation of the
-stored Target and the hop chain. The first permit is for the root. A
-redirect needs a finished parent from the same Attempt with a matching
+stored Target and the hop chain. The first permit is for the compiled entry
+path. B2 asset selection may bind a same-origin path from an immutable HTML
+Observation for the same Target, namespace and scope. Sitemap and asset paths
+require a fresh compatible Robots result at each permit. A redirect needs a finished parent from the same Attempt with a matching
 request URI digest. A unique parent reference makes each continuation
 single-use. An operation ID can still replay its original grant. The
 quota ledger stores digests and hop numbers, with the same six-minute
-retention. It keeps redirect URLs and query values out of the ledger.
+retention. It keeps redirect URLs and query values out of the ledger. Unresolved
+B2 redirects can appear as sanitized, unverified links in diagnostic history.
+They do not advance current results or the change stream.
+
+RDAP uses a distinct permit for the pinned IANA bootstrap and one for its
+validated registry endpoint. Migration 6 enforces one of each stage per
+Attempt and preserves the derived endpoint for idempotent grant replay. A
+successful, timely bootstrap finish publishes the shared in-memory cache after
+commit. The database retains the stage and receipt, with no raw bootstrap
+payload or registry contact records. Both stages debit the same RDAP account
+bucket across Workers.
 
 The configured global bucket limits issuance across all Workers. Permit rows
 remain for six minutes after expiry for bounded replay protection, then the

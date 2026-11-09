@@ -54,6 +54,8 @@ func (s Scope) Valid() bool {
 }
 
 type Task struct {
+	WebPath     string         `json:"web_path,omitempty"`
+	AssetSizes  []string       `json:"asset_sizes,omitempty"`
 	TargetID    uuid.UUID      `json:"target_id"`
 	Provider    string         `json:"provider"`
 	Resource    string         `json:"resource_type"`

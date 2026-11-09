@@ -145,7 +145,7 @@ func execute(ctx context.Context, api client, registry *provider.Registry, pool 
 			return
 		}
 		session := pool.Session(workCtx, *claim.Network, *cap.Network, claim.Task.Namespace, cap.Capability, permitGate{api, claim, &policyChanged},
-			egress.WebDestination{ID: claim.Task.TargetID, Origin: claim.Task.ExternalKey})
+			egress.WebDestination{ID: claim.Task.TargetID, Origin: claim.Task.ExternalKey, Path: claim.Task.WebPath})
 		defer session.Close()
 		network = session.Client()
 	}

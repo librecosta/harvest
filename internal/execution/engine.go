@@ -33,6 +33,7 @@ type Engine struct {
 	policyUncertain  bool
 	retention        config.Retention
 	consumerPolicies map[string]config.Principal
+	rdap             rdapCache
 }
 
 func New(db *pgxpool.Pool, registry *provider.Registry, principals []config.Principal, retention config.Retention) *Engine {

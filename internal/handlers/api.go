@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/librecosta/harvest/internal/config"
+	"github.com/librecosta/harvest/internal/egress"
 	"github.com/librecosta/harvest/internal/execution"
 )
 
@@ -122,6 +123,10 @@ func (a *API) respond(c fiber.Ctx, status int, value any, err error) error {
 		return problem(c, 403, err.Error(), info.id)
 	case errors.Is(err, execution.ErrNotFound):
 		return problem(c, 404, err.Error(), info.id)
+	case errors.Is(err, egress.ErrRobotsUnknown), errors.Is(err, egress.ErrRobotsBlocked), errors.Is(err, egress.ErrCandidate),
+		errors.Is(err, egress.ErrBootstrapRequired), errors.Is(err, egress.ErrBootstrapReady),
+		errors.Is(err, egress.ErrBootstrapUnavailable), errors.Is(err, egress.ErrRegistryMissing):
+		return problem(c, 409, err.Error(), info.id)
 	case errors.Is(err, execution.ErrUnsupported), errors.Is(err, execution.ErrFence),
 		errors.Is(err, execution.ErrCancelled), errors.Is(err, execution.ErrConflict), errors.Is(err, execution.ErrTerminal), errors.Is(err, execution.ErrQuotaBudget), errors.Is(err, execution.ErrEgressUnavailable):
 		return problem(c, 409, err.Error(), info.id)

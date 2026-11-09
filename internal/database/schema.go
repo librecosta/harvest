@@ -7,7 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const schemaVersion = 5
+const schemaVersion = 6
 
 func CheckSchema(ctx context.Context, pool *pgxpool.Pool) error {
 	// Goose owns this table, so it is intentionally absent from sqlc's DDL.
@@ -28,6 +28,8 @@ func CheckSchema(ctx context.Context, pool *pgxpool.Pool) error {
 			AND attname = 'network_paths' AND NOT attisdropped)
 		AND EXISTS (SELECT 1 FROM pg_catalog.pg_attribute WHERE attrelid = pg_catalog.to_regclass('harvest.quota_permits')
 			AND attname = 'redirect_digest' AND NOT attisdropped)
+		AND EXISTS (SELECT 1 FROM pg_catalog.pg_attribute WHERE attrelid = pg_catalog.to_regclass('harvest.quota_permits')
+			AND attname = 'rdap_stage' AND NOT attisdropped)
 		FROM public.goose_db_version ORDER BY id DESC LIMIT 1`).
 		Scan(&version, &applied, &present)
 	if err != nil || version != schemaVersion || !applied || !present {

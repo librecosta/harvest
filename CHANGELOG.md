@@ -1,5 +1,14 @@
 # Changelog
 
+## V0.1-B2
+
+- Enabled bounded Robots, Sitemap, RDAP and asset discovery. Added RSS and
+  Atom candidates to the existing homepage Observation with zero extra GETs.
+- Extended the shared Permit boundary for known paths, stored asset candidates
+  and IANA-selected registry endpoints. Added migration 6 for replay receipts.
+- Retained privacy-filtered scoped results and last known good across source
+  failures. Added isolated dual-Worker HTTP CONNECT and SOCKS5 verification.
+
 ## V0.1-B1
 
 - Enabled homepage metadata and 18 passive Web fingerprints, eight recursive

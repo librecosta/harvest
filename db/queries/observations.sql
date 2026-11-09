@@ -30,6 +30,17 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18);
 -- name: ObservationsByID :many
 SELECT * FROM harvest.observations WHERE id = ANY(sqlc.arg(ids)::uuid[]);
 
+-- name: CurrentRobotsPolicy :one
+SELECT o.data FROM harvest.current_results c
+JOIN harvest.observations o ON o.id = c.observation_id
+WHERE c.stream = $1 AND c.target_id = $2 AND c.capability = 'web.robots'
+  AND c.output_schema = 1 AND c.scope_key = $3 AND c.confirmed_at >= statement_timestamp() - interval '8 days'
+  AND NOT EXISTS (
+    SELECT 1 FROM harvest.jobs j WHERE j.namespace = c.stream AND j.target_id = c.target_id
+      AND j.capability = 'web.robots' AND j.scope = sqlc.arg(job_scope)::jsonb
+      AND j.state NOT IN ('succeeded', 'queued') AND j.updated_at > c.confirmed_at
+  );
+
 -- name: CurrentResultPage :many
 SELECT c.target_id,c.capability,c.output_schema,c.scope_key,c.observation_id,c.position,c.confirmed_at,o.stored_bytes
 FROM harvest.current_results c

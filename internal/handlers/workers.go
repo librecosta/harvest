@@ -69,7 +69,7 @@ func (a *API) Permit() fiber.Handler {
 }
 
 func (a *API) FinishPermit() fiber.Handler {
-	return action(a, 204, func(c fiber.Ctx, p config.Principal, in execution.PermitFinish) (any, error) {
+	return boundedAction(a, 204, execution.MaxPermitFinishBody, func(c fiber.Ctx, p config.Principal, in execution.PermitFinish) (any, error) {
 		id, err := pathID(c)
 		if err != nil {
 			return nil, err

@@ -117,9 +117,14 @@ Target, then submit a request such as the following inside the Job's
 | `web.http` | HTTP(S) `web.origin` | `{}`. Optional `scope.locale` sets the homepage language preference. | 15 minutes |
 | `web.dns` | `web.domain` | `{}` for all eight supported record types, or `{"types":["A","MX"]}`. | 1 hour |
 | `web.tls` | HTTPS `web.origin` | `{}` for a verified HTTPS HEAD at the root. | 6 hours |
+| `web.robots` | HTTP(S) `web.origin` | `{}` for `/robots.txt`. | 24 hours |
+| `web.sitemap` | HTTP(S) `web.origin` | `{}` for `/sitemap.xml`. | 24 hours |
+| `web.assets` | HTTP(S) `web.origin` | `{}` for `/favicon.ico`, or `{"kind":"icon","observation_id":"<uuid>","index":0}` for one accepted candidate. `kind` may also be `manifest`. | 24 hours |
+| `web.rdap` | `web.domain` | `{}` for the ICANN registrable domain. | 7 days |
 
 For an initial schedule, use 24 hours for HTTP and DNS and two to seven
-days for TLS. Schedules are created explicitly.
+days for TLS. Start with seven days for robots, sitemap and recurring assets,
+and 14–30 days for RDAP. Schedules are created explicitly.
 
 Homepage acquisition starts at the registered origin's root on port 80 or
 443. A Job follows up to three same-origin redirects, with one permit per
@@ -135,6 +140,28 @@ Each type consumes one HTTP permit. TTL and AD describe the resolver's
 answer. DNS record types, HTML, HTTP and TLS have independently retained
 last-known-good values. See the [B1 acceptance record](docs/harvest-v0.1-b1-acceptance.md)
 for payload semantics and measured costs.
+
+B2 requires explicit migration 6 and source policies for the capabilities you
+enable. Sitemap and assets use a successful, fresh Robots result for the same
+Target, namespace and scope. Run `web.robots` first. An observed Robots 404
+allows these paths. The control plane defers unknown policy and refuses blocked
+paths. Each of these capabilities uses one initial GET and at most two
+same-origin redirects, each with its own permit. Sitemap results retain a
+bounded sample of links as hints. Homepage RSS and Atom hints use the original
+HTML response and require zero extra GETs.
+
+Select an asset by its zero-based index within `kind` in the stored homepage
+HTML Observation's `asset_candidates` list. Use the same Target, namespace,
+locale and egress scope. Only eligible same-origin candidates can be selected.
+The control plane checks the immutable Observation again before issuing a
+permit. Run a fresh homepage Job if an older Observation has no candidate data
+or has aged out of history. Assets return metadata and digests.
+
+RDAP has one registry GET per Attempt and at most one additional IANA bootstrap
+GET on a cold or expired cache. All RDAP sources share one PostgreSQL account
+bucket with a maximum of 60 requests/minute, burst 4 and concurrency 2. The
+control plane shares its 24-hour bootstrap cache across Workers. See the
+[B2 acceptance record](docs/harvest-v0.1-b2-acceptance.md) for bounds and measured costs.
 
 ## Docker
 

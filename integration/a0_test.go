@@ -94,16 +94,16 @@ func TestA0(t *testing.T) {
 	address := blocker.Addr().String()
 	writeConfig(t, configPath, address, "127.0.0.1", dbPort, password)
 	expectFailure(t, scratch, hostEnv, bin, "schema is unavailable or incompatible", "serve", "--local", "--config", configPath)
-	if got := native("migrate", "status", "--config", configPath); got != "1 pending\n2 pending\n3 pending\n4 pending\n5 pending" {
+	if got := native("migrate", "status", "--config", configPath); got != "1 pending\n2 pending\n3 pending\n4 pending\n5 pending\n6 pending" {
 		t.Fatalf("A0 upgrade status: %s", got)
 	}
 	if got := dbQuery("SELECT count(*) FROM pg_namespace WHERE nspname = 'harvest' UNION ALL SELECT count(*) FROM pg_tables WHERE schemaname = 'public'"); got != "0\n0" {
 		t.Fatalf("serve or status applied DDL: %q", got)
 	}
-	if got := native("migrate", "up", "--config", configPath); got != "Applied 5 Harvest migrations." {
+	if got := native("migrate", "up", "--config", configPath); got != "Applied 6 Harvest migrations." {
 		t.Fatalf("A0 upgrade: %s", got)
 	}
-	if got := native("migrate", "status", "--config", configPath); got != "1 applied\n2 applied\n3 applied\n4 applied\n5 applied" {
+	if got := native("migrate", "status", "--config", configPath); got != "1 applied\n2 applied\n3 applied\n4 applied\n5 applied\n6 applied" {
 		t.Fatalf("migration status: %s", got)
 	}
 	if got := native("migrate", "up", "--config", configPath); got != "Applied 0 Harvest migrations." {

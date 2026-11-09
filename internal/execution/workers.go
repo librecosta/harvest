@@ -12,6 +12,7 @@ import (
 
 	"github.com/librecosta/harvest/internal/config"
 	q "github.com/librecosta/harvest/internal/database/queries"
+	"github.com/librecosta/harvest/internal/egress"
 	"github.com/librecosta/harvest/internal/provider"
 )
 
@@ -145,6 +146,12 @@ func (e *Engine) Claim(ctx context.Context, p config.Principal, id uuid.UUID) (*
 		task, err := work.task()
 		if err != nil {
 			return nil, err
+		}
+		if work.capability.Network != nil && work.capability.Network.Candidate {
+			task.WebPath, task.AssetSizes, err = assetPath(ctx, db, task)
+			if err != nil && !errors.Is(err, egress.ErrCandidate) {
+				return nil, err
+			}
 		}
 		job, err = db.MarkJobClaimed(ctx, q.MarkJobClaimedParams{ID: job.ID, UpdatedAt: now})
 		if err != nil {
@@ -343,7 +350,8 @@ func normalizeResult(cap provider.Capability, result provider.Result) (provider.
 			if cap.Observation == nil || !slices.Contains(cap.Observation.DiagnosticEvidence, result.Code) {
 				return result, false, ErrInvalid
 			}
-			retryable = result.Code == "resolver_unavailable" || result.Code == "resolver_servfail" || result.Code == "proxy_unavailable"
+			retryable = result.Code == "resolver_unavailable" || result.Code == "resolver_servfail" || result.Code == "proxy_unavailable" ||
+				result.Code == "robots_unavailable" || result.Code == "rdap_bootstrap_unavailable"
 		}
 	case "cancelled":
 		if result.Code != "cancelled" {

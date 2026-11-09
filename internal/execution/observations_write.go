@@ -123,9 +123,18 @@ func normalizeSegments(cap provider.Capability, task provider.Task, result *prov
 			}
 			valid++
 		case "not_modified", "unavailable", "invalid", "not_covered":
-			if len(s.Data) != 0 || s.Withdraw || (s.Evidence != "" &&
+			if s.Withdraw || (s.Evidence != "" &&
 				((s.State != "unavailable" && s.State != "invalid") || !slices.Contains(policy.DiagnosticEvidence, s.Evidence))) {
 				return nil, ErrInvalid
+			}
+			if len(s.Data) != 0 {
+				if s.Evidence == "" || policy.NormalizeDiagnosticData == nil {
+					return nil, ErrInvalid
+				}
+				s.Data, err = policy.NormalizeDiagnosticData(s.Evidence, s.Data)
+				if err != nil || len(s.Data) > policy.MaxDataBytes || !s.Data.IsValid() {
+					return nil, ErrInvalid
+				}
 			}
 			if s.State == "not_modified" {
 				if policy.Sample {

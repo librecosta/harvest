@@ -146,9 +146,25 @@ func (q *Queries) FinishQuotaPermit(ctx context.Context, arg FinishQuotaPermitPa
 	return err
 }
 
+const hasRDAPStage = `-- name: HasRDAPStage :one
+SELECT EXISTS (SELECT 1 FROM harvest.quota_permits WHERE attempt_id = $1 AND rdap_stage = $2 AND rdap_stage <> 0)
+`
+
+type HasRDAPStageParams struct {
+	AttemptID uuid.UUID `json:"attempt_id"`
+	RdapStage int16     `json:"rdap_stage"`
+}
+
+func (q *Queries) HasRDAPStage(ctx context.Context, arg HasRDAPStageParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasRDAPStage, arg.AttemptID, arg.RdapStage)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const insertQuotaPermit = `-- name: InsertQuotaPermit :exec
-INSERT INTO harvest.quota_permits (id, attempt_id, operation_id, request_hash, bucket_keys, account_key, max_bytes, expires_at, web_hop, previous_permit)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+INSERT INTO harvest.quota_permits (id, attempt_id, operation_id, request_hash, bucket_keys, account_key, max_bytes, expires_at, web_hop, previous_permit, rdap_stage, rdap_endpoint)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 `
 
 type InsertQuotaPermitParams struct {
@@ -162,6 +178,8 @@ type InsertQuotaPermitParams struct {
 	ExpiresAt      time.Time  `json:"expires_at"`
 	WebHop         *int16     `json:"web_hop"`
 	PreviousPermit *uuid.UUID `json:"previous_permit"`
+	RdapStage      int16      `json:"rdap_stage"`
+	RdapEndpoint   string     `json:"rdap_endpoint"`
 }
 
 func (q *Queries) InsertQuotaPermit(ctx context.Context, arg InsertQuotaPermitParams) error {
@@ -176,6 +194,8 @@ func (q *Queries) InsertQuotaPermit(ctx context.Context, arg InsertQuotaPermitPa
 		arg.ExpiresAt,
 		arg.WebHop,
 		arg.PreviousPermit,
+		arg.RdapStage,
+		arg.RdapEndpoint,
 	)
 	return err
 }
@@ -221,7 +241,7 @@ func (q *Queries) LockQuotaBuckets(ctx context.Context, keys []string) ([]Harves
 }
 
 const lockQuotaPermitForFinish = `-- name: LockQuotaPermitForFinish :one
-SELECT p.id, p.attempt_id, p.operation_id, p.request_hash, p.bucket_keys, p.account_key, p.max_bytes, p.expires_at, p.finished_at, p.finish_hash, p.web_hop, p.previous_permit, p.redirect_digest FROM harvest.quota_permits p
+SELECT p.id, p.attempt_id, p.operation_id, p.request_hash, p.bucket_keys, p.account_key, p.max_bytes, p.expires_at, p.finished_at, p.finish_hash, p.web_hop, p.previous_permit, p.redirect_digest, p.rdap_stage, p.rdap_endpoint FROM harvest.quota_permits p
 JOIN harvest.attempts a ON a.id = p.attempt_id
 JOIN harvest.workers w ON w.id = a.worker_id
 WHERE p.id = $1 AND w.id = $2 AND w.principal = $3
@@ -262,6 +282,8 @@ func (q *Queries) LockQuotaPermitForFinish(ctx context.Context, arg LockQuotaPer
 		&i.WebHop,
 		&i.PreviousPermit,
 		&i.RedirectDigest,
+		&i.RdapStage,
+		&i.RdapEndpoint,
 	)
 	return i, err
 }
@@ -306,7 +328,7 @@ func (q *Queries) QuotaPermitCount(ctx context.Context, keys []string) (int64, e
 }
 
 const quotaPermitReplay = `-- name: QuotaPermitReplay :one
-SELECT id, attempt_id, operation_id, request_hash, bucket_keys, account_key, max_bytes, expires_at, finished_at, finish_hash, web_hop, previous_permit, redirect_digest FROM harvest.quota_permits WHERE attempt_id = $1 AND operation_id = $2
+SELECT id, attempt_id, operation_id, request_hash, bucket_keys, account_key, max_bytes, expires_at, finished_at, finish_hash, web_hop, previous_permit, redirect_digest, rdap_stage, rdap_endpoint FROM harvest.quota_permits WHERE attempt_id = $1 AND operation_id = $2
 `
 
 type QuotaPermitReplayParams struct {
@@ -331,6 +353,8 @@ func (q *Queries) QuotaPermitReplay(ctx context.Context, arg QuotaPermitReplayPa
 		&i.WebHop,
 		&i.PreviousPermit,
 		&i.RedirectDigest,
+		&i.RdapStage,
+		&i.RdapEndpoint,
 	)
 	return i, err
 }

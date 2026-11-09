@@ -17,7 +17,7 @@ import (
 	"github.com/librecosta/harvest/internal/provider"
 )
 
-func configureB1(t *testing.T, p *testPlane, a, b *fakeProxy) (string, string) {
+func configureWeb(t *testing.T, p *testPlane, a, b *fakeProxy, offers []provider.Offer) (string, string) {
 	t.Helper()
 	raw, err := os.ReadFile(p.config)
 	if err != nil {
@@ -25,6 +25,11 @@ func configureB1(t *testing.T, p *testPlane, a, b *fakeProxy) (string, string) {
 	}
 	namespaces := []string{"web_direct", "web_connect", "web_socks", "web_hold", "web_wire", "web_throttle", "web_tls", "web_tls403"}
 	var grants strings.Builder
+	var capabilities []string
+	for _, offer := range offers {
+		capabilities = append(capabilities, offer.Capability)
+	}
+	withRDAP := slices.Contains(capabilities, "web.rdap")
 	for _, g := range []struct{ name, namespaces, profiles string }{
 		{"web_a", "web_direct, web_connect, web_hold, web_throttle", "local, connect"},
 		{"web_b", "web_socks, web_hold, web_tls, web_tls403", "socks"},
@@ -32,8 +37,8 @@ func configureB1(t *testing.T, p *testPlane, a, b *fakeProxy) (string, string) {
 	} {
 		token := rand.Text() + rand.Text()
 		p.tokens[g.name] = token
-		fmt.Fprintf(&grants, "  - name: %q\n    role: worker\n    token: %q\n    namespaces: [%s]\n    capabilities: [web.http, web.tls, web.dns]\n    egress_profiles: [%s]\n    max_slots: 1\n",
-			g.name, token, g.namespaces, g.profiles)
+		fmt.Fprintf(&grants, "  - name: %q\n    role: worker\n    token: %q\n    namespaces: [%s]\n    capabilities: [%s]\n    egress_profiles: [%s]\n    max_slots: 1\n",
+			g.name, token, g.namespaces, strings.Join(capabilities, ", "), g.profiles)
 	}
 	server := strings.Replace(string(raw), "public, private, scheduler, embedded", "public, private, scheduler, embedded, "+strings.Join(namespaces, ", "), 1)
 	server = strings.Replace(server, "    namespaces: [public]\n  - name: \"worker_a\"", "    namespaces: [public, "+strings.Join(namespaces, ", ")+"]\n  - name: \"worker_a\"", 1)
@@ -57,12 +62,19 @@ func configureB1(t *testing.T, p *testPlane, a, b *fakeProxy) (string, string) {
   sources:`)
 	for i, ns := range namespaces {
 		profile := []string{"local", "connect", "socks", "connect", "local", "connect", "socks", "socks"}[i]
-		for _, offer := range b1Offers {
+		for _, offer := range offers {
+			account := ns
+			if offer.Capability == "web.rdap" {
+				account = "rdap_account"
+			}
 			fmt.Fprintf(&network, "    - {capability: %s, namespace: %s, profile: %s, provider_bucket: web_provider, account_bucket: %s}\n",
-				offer.Capability, ns, profile, ns)
+				offer.Capability, ns, profile, account)
 		}
 	}
 	fmt.Fprintln(&network, "  quotas:")
+	if withRDAP {
+		fmt.Fprintln(&network, "    - {id: rdap_account, burst: 4, per_minute: 60, concurrency: 2}")
+	}
 	for _, bucket := range append([]string{"web_global", "web_provider", "web_local", "web_connect_path", "web_socks_path"}, namespaces...) {
 		fmt.Fprintf(&network, "    - {id: %s, burst: 64, per_minute: 1200, concurrency: 8}\n", bucket)
 	}
@@ -72,7 +84,7 @@ func configureB1(t *testing.T, p *testPlane, a, b *fakeProxy) (string, string) {
 	worker := func(name, profile string, end *fakeProxy, direct bool) string {
 		var data strings.Builder
 		fmt.Fprintf(&data, "control_url: %q\ntoken: %q\nconcurrency: 1\noffers:\n", "http://"+p.address, p.tokens[name])
-		for _, offer := range b1Offers {
+		for _, offer := range offers {
 			fmt.Fprintf(&data, "  - {capability: %s, request_schema: 1, output_schema: 1, implementation: web_v1}\n", offer.Capability)
 		}
 		fmt.Fprintf(&data, `egress:
@@ -101,7 +113,7 @@ func b1Request(target uuid.UUID, capability, params string) execution.Request {
 func TestB1(t *testing.T) {
 	p := startFixture(t)
 	lab, a, b := newWebLab(t, p)
-	configA, configB := configureB1(t, p, a, b)
+	configA, configB := configureWeb(t, p, a, b, b1Offers)
 	p.cli("policy", "init", "--config", p.config)
 	control := measureControl(t, p, configA, configB)
 	server := p.serve()

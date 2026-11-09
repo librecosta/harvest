@@ -23,7 +23,7 @@ func Register(app *fiber.App, ready func(context.Context) bool, api *handlers.AP
 	}
 }
 
-// Set the two larger request budgets before fasthttp reads the body.
+// Set the route-specific larger request budgets before fasthttp reads the body.
 func requestBodyLimit(h *fasthttp.RequestHeader) fasthttp.RequestConfig {
 	path, _, _ := bytes.Cut(h.RequestURI(), []byte("?"))
 	if bytes.Equal(h.Method(), []byte("PUT")) && bytes.Equal(path, []byte("/api/v1"+networkPolicyPath)) {
@@ -32,17 +32,25 @@ func requestBodyLimit(h *fasthttp.RequestHeader) fasthttp.RequestConfig {
 	if !h.IsPost() {
 		return fasthttp.RequestConfig{}
 	}
-	id, ok := bytes.CutPrefix(path, []byte("/internal/v1/attempts/"))
-	if !ok {
-		return fasthttp.RequestConfig{}
+	for _, route := range []struct {
+		prefix, suffix string
+		limit          int
+	}{
+		{"/internal/v1/attempts/", "/complete", provider.MaxCompletionBody},
+		{"/internal/v1/permits/", "/finish", execution.MaxPermitFinishBody},
+	} {
+		id, ok := bytes.CutPrefix(path, []byte(route.prefix))
+		if !ok {
+			continue
+		}
+		id, ok = bytes.CutSuffix(id, []byte(route.suffix))
+		if !ok || len(id) != 36 {
+			break
+		}
+		parsed, err := uuid.Parse(string(id))
+		if err == nil && execution.UUIDv7(parsed) {
+			return fasthttp.RequestConfig{MaxRequestBodySize: route.limit}
+		}
 	}
-	id, ok = bytes.CutSuffix(id, []byte("/complete"))
-	if !ok || len(id) != 36 {
-		return fasthttp.RequestConfig{}
-	}
-	parsed, err := uuid.Parse(string(id))
-	if err != nil || !execution.UUIDv7(parsed) {
-		return fasthttp.RequestConfig{}
-	}
-	return fasthttp.RequestConfig{MaxRequestBodySize: provider.MaxCompletionBody}
+	return fasthttp.RequestConfig{}
 }
