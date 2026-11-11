@@ -188,9 +188,15 @@ func TestA0(t *testing.T) {
 		t.Fatal("native process did not stop")
 	}
 	native("stop")
-	compose("stop", "harvest")
-	if got := docker("inspect", "--format", "{{.State.ExitCode}} {{.State.OOMKilled}}", id); got != "0 false" {
-		t.Fatalf("container did not exit cleanly after SIGTERM: %s", got)
+	for cycle := range 2 {
+		if cycle > 0 {
+			compose("up", "-d", "--wait", "--wait-timeout", "45", "harvest")
+			waitProbe(t, compose("port", "harvest", "8080"), "/readyz", http.StatusOK, "ok")
+		}
+		compose("stop", "harvest")
+		if got := docker("inspect", "--format", "{{.State.ExitCode}} {{.State.OOMKilled}}", id); got != "0 false" {
+			t.Fatalf("container did not exit cleanly after SIGTERM in cycle %d: %s", cycle+1, got)
+		}
 	}
 	logs := compose("logs", "--no-log-prefix", "harvest")
 	if !strings.Contains(logs, "HTTP draining") || !strings.Contains(logs, `"drained":true`) {

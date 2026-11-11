@@ -91,20 +91,46 @@ type webLab struct {
 	dns           atomic.Int32
 	revision      atomic.Int32
 	rebindFile    string
+	healthyHEAD   bool
 	held, release chan struct{}
 }
 
-func newWebLab(t *testing.T, p *testPlane) (*webLab, *fakeProxy, *fakeProxy) {
+func newWebLab(t *testing.T, p *testPlane, steam *steamLab) (*webLab, *fakeProxy, *fakeProxy) {
 	t.Helper()
 	w := &webLab{t: t, network: &networkLab{t: t, peers: make(map[string]string)},
 		rebindFile: filepath.Join(p.scratch, "rebind"), held: make(chan struct{}, 1), release: make(chan struct{}, 1)}
 	certPEM, cert := testWebCA(t)
-	base := cert(2, []string{"*.example.com", "dns.google"}, false, false)
-	renewed := cert(3, []string{"*.example.com", "dns.google"}, false, false)
+	names := []string{"*.example.com", "dns.google"}
+	if steam != nil {
+		names = append(names, "store.steampowered.com", "api.steampowered.com")
+	}
+	base := cert(2, names, false, false)
+	renewed := cert(3, names, false, false)
 	wrong := cert(4, []string{"different.example.com"}, false, false)
 	expired := cert(5, []string{"expired.example.com"}, true, false)
 	unknown := cert(6, []string{"untrusted.example.com"}, false, true)
-	tlsSite := httptest.NewUnstartedServer(http.HandlerFunc(w.serve))
+	serve := http.HandlerFunc(w.serve)
+	if steam != nil {
+		steam.network = w.network
+		w.healthyHEAD = true
+		serve = func(res http.ResponseWriter, req *http.Request) {
+			switch req.Host {
+			case "store.steampowered.com", "api.steampowered.com":
+				steam.serve(res, req)
+				return
+			}
+			if req.URL.Path == "/robots.txt" {
+				w.network.mu.Lock()
+				w.network.hits = append(w.network.hits, networkHit{mode: req.Method + " /robots.txt", label: req.Host, proxy: w.network.peers[req.RemoteAddr], at: time.Now()})
+				w.network.mu.Unlock()
+				res.Header().Set("Content-Type", "text/plain")
+				_, _ = io.WriteString(res, "User-agent: *\nDisallow: /private\n")
+				return
+			}
+			w.serve(res, req)
+		}
+	}
+	tlsSite := httptest.NewUnstartedServer(serve)
 	tlsSite.TLS = &tls.Config{GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 		switch hello.ServerName {
 		case "wrong.example.com":
@@ -197,6 +223,10 @@ func (l *webLab) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodHead {
+		if l.healthyHEAD {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		w.Header().Set("Location", "/%ZZ")
 		w.Header().Set("Connection", "close")
 		if r.Host == "valid403.example.com" {

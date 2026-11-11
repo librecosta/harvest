@@ -57,3 +57,6 @@ the checkout. The request cancels the same context used for OS signals.
 - [B2 acceptance](../docs/harvest-v0.1-b2-acceptance.md)
 - [C Steam integration contract](../docs/harvest-v0.1-c-steam-provider.md)
 - [C acceptance](../docs/harvest-v0.1-c-acceptance.md)
+- [D operations and consumer contract](../docs/harvest-v0.1-d-operations-consumer-proof.md)
+- [D acceptance](../docs/harvest-v0.1-d-acceptance.md)
+- [Operations runbook](../docs/operations.md)

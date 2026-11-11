@@ -66,6 +66,9 @@ SELECT * FROM harvest.consumers WHERE id = $1 AND stream = $2 AND principal = $3
 -- name: LockConsumer :one
 SELECT * FROM harvest.consumers WHERE id = $1 AND stream = $2 AND principal = $3 FOR UPDATE;
 
+-- name: ChangeEventCommittedAt :one
+SELECT committed_at FROM harvest.change_events WHERE stream = $1 AND position = $2;
+
 -- name: StreamConsumers :many
 SELECT * FROM harvest.consumers WHERE stream = $1 ORDER BY id;
 

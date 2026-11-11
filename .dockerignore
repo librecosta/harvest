@@ -1,6 +1,9 @@
 **
 !go.mod
 !go.sum
+!LICENSE
+!LICENSE.steam-go
+!LICENSE.x-time
 !cmd/
 !cmd/**
 !db/

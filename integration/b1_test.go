@@ -126,7 +126,7 @@ func b1Request(target uuid.UUID, capability, params string) execution.Request {
 
 func TestB1(t *testing.T) {
 	p := startFixture(t)
-	lab, a, b := newWebLab(t, p)
+	lab, a, b := newWebLab(t, p, nil)
 	configA, configB := configureWeb(t, p, a, b, b1Offers)
 	p.cli("policy", "init", "--config", p.config)
 	control := measureControl(t, p, configA, configB)

@@ -1,0 +1,31 @@
+# Copy to config.worker.yaml and match the token and region to the server.
+control_url: "http://127.0.0.1:8080"
+token: "REPLACE_WITH_A_RANDOM_WORKER_SERVICE_TOKEN"
+concurrency: 2
+
+offers:
+  - {capability: "web.http", request_schema: 1, output_schema: 1, implementation: "web_v1"}
+  - {capability: "web.dns", request_schema: 1, output_schema: 1, implementation: "web_v1"}
+  - {capability: "web.tls", request_schema: 1, output_schema: 1, implementation: "web_v1"}
+  - {capability: "web.robots", request_schema: 1, output_schema: 1, implementation: "web_v1"}
+  - {capability: "web.sitemap", request_schema: 1, output_schema: 1, implementation: "web_v1"}
+  - {capability: "web.assets", request_schema: 1, output_schema: 1, implementation: "web_v1"}
+  - {capability: "web.rdap", request_schema: 1, output_schema: 1, implementation: "web_v1"}
+  - {capability: "steam.details", request_schema: 1, output_schema: 1, implementation: "steam_v1"}
+  - {capability: "steam.news", request_schema: 1, output_schema: 1, implementation: "steam_v1"}
+  - {capability: "steam.players", request_schema: 1, output_schema: 1, implementation: "steam_v1"}
+
+egress:
+  profiles:
+    - name: "regional"
+      mode: "require_proxy"
+      endpoints: ["exit_cn"]
+  # Replace the URL with your approved endpoint. Put any credentials here.
+  endpoints:
+    - id: "exit_cn"
+      url: "https://proxy.example.invalid:8443"
+      enabled: true
+      region: "cn"
+      concurrency: 2
+      cooldown_seconds: 30
+      bytes_per_minute: 4194304

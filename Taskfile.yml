@@ -100,4 +100,23 @@ tasks:
   check:containers:
     desc: Verify lifecycle, execution, egress, recovery and live policy on disposable PostgreSQL 18
     cmds:
-      - go test -tags=integration -count=1 -timeout=10m -v ./integration
+      - go test -tags=integration -count=1 -timeout=12m -v ./integration
+
+  check:soak:
+    desc: Run a 15-minute mixed workload against disposable local fixtures
+    env:
+      HARVEST_D_SOAK: '1'
+    cmds:
+      - go test -tags=integration -run '^TestD$' -count=1 -timeout=19m -v ./integration
+
+  check:public-smoke:
+    desc: Run one explicitly authorized Web or Storefront Job through a supplied proxy and disposable DB
+    env:
+      HARVEST_PUBLIC_SMOKE_CONFIRM: '{{.CONFIRM}}'
+      HARVEST_PUBLIC_SMOKE_SOURCE: '{{.SOURCE}}'
+      HARVEST_PUBLIC_SMOKE_TARGET: '{{.TARGET}}'
+      HARVEST_PUBLIC_SMOKE_LANGUAGE: '{{default "english" .LANGUAGE}}'
+      HARVEST_PUBLIC_SMOKE_COUNTRY: '{{default "US" .COUNTRY}}'
+      HARVEST_PUBLIC_SMOKE_WORKER: '{{.WORKER_CONFIG}}'
+    cmds:
+      - go test -tags='integration harvest_public_smoke' -run '^TestPublicSmoke$' -count=1 -timeout=2m -v ./integration

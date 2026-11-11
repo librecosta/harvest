@@ -4,8 +4,10 @@ Harvest is a standalone Go data acquisition engine. Its durable control plane
 manages Targets, schedules and Worker leases, meters outbound HTTP across
 Workers, and stores typed, scoped observations. Consumers can read the latest
 good results and replay changes or recover through a snapshot. The built-in
-Web Provider collects homepage, DNS and verified TLS evidence. Steam remains
-planned. Integration tests use isolated PostgreSQL and mock network services.
+Web Provider collects homepage metadata, DNS, verified TLS and bounded
+discovery data. The Steam Provider collects Storefront details, News and
+Current Players. Integration tests use disposable PostgreSQL and local
+network fixtures.
 
 ## Local development
 
@@ -20,6 +22,7 @@ disposable connection when it lacks TLS.
 task install
 task migrate ACTION=status
 task migrate ACTION=up
+task policy:init
 task start
 ```
 
@@ -37,8 +40,8 @@ Each runtime reads a single explicit YAML file. Server tasks use
 `config.yaml` by default and accept `CONFIG=path/to/file.yaml`. Unknown or
 duplicate keys, extra documents and aliases are rejected. YAML secrets stay
 local. Each service principal uses a distinct random URL-safe Bearer token
-and explicitly lists its namespaces. See the commented example for a
-consumer operator. Reader principals can read their scopes, writers can also
+and explicitly lists its namespaces. The example includes an operator,
+consumer reader and Worker. Reader principals can read their scopes, writers can also
 register Targets and submit work, and operators additionally cancel, retry,
 and view operational status.
 
@@ -66,6 +69,8 @@ a private IP literal. For HTTPS, configure a trusted certificate and private
 ingress. Worker readiness is available through
 `harvest healthcheck --worker --config config.worker.yaml`. An embedded worker
 can use the same YAML shape under `local_worker` with the server's local URL.
+For proxy deployment, use the [regional server](config.proxy.example.yaml)
+and [regional Worker](config.worker.proxy.example.yaml) examples.
 
 For a compiled HTTP capability, grant the named profile to the Worker
 principal and initialize the PostgreSQL policy once. After `task migrate
@@ -188,25 +193,12 @@ The account ledger counts issued permits from midnight UTC independently of
 its minute rate. Size the account limit for the upstream allowance and any
 use outside this Harvest instance. See the [C acceptance record](docs/harvest-v0.1-c-acceptance.md).
 
-## Docker
+## Operations and verification
 
-```sh
-task check:docker
-docker compose run --rm harvest migrate up --config /etc/harvest/config.yaml
-docker compose up -d --wait
-docker compose stop
-```
-
-Set `http.listen` to `"0.0.0.0:8080"` in the mounted server YAML. The
-existing PostgreSQL 18 server must be reachable from the container.
-For PostgreSQL on the Docker host, Compose supplies `host.docker.internal`.
-Compose publishes server HTTP on host loopback.
-
-`HARVEST_CONFIG`, `HARVEST_IMAGE`, and `HARVEST_HTTP_PORT` configure the bind
-mount, image and published port. The optional `worker` profile uses the same
-image and `HARVEST_WORKER_CONFIG` (default `./config.worker.yaml`). Mounted
-configuration is read-only and must be readable by container UID 65532.
-Use an immutable image reference for deployment.
+Use the [operations runbook](docs/operations.md) for Task and Compose
+setup, policy updates, outages, consumer recovery and optional public
+smoke testing. `task check:soak` runs the 15-minute local mixed workload.
+See the [D acceptance record](docs/harvest-v0.1-d-acceptance.md) for results.
 
 ## Database workflow
 

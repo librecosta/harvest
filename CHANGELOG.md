@@ -1,5 +1,11 @@
 # Changelog
 
+## V0.1-D
+
+- Documented direct and regional-proxy deployments for Web and Steam.
+- Added mixed local load and independent PostgreSQL consumer recovery checks.
+- Added an operator-visible replay-age warning and an opt-in public smoke task.
+
 ## V0.1-C
 
 - Enabled Steam Storefront details, Steam News and Current Players with

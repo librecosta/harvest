@@ -45,10 +45,24 @@ func sampleHeap(p *testPlane, processes ...*child) []uint64 {
 }
 
 type permitMetrics struct {
-	mu      sync.Mutex
-	permits []time.Duration
-	bytes   int64
+	mu        sync.Mutex
+	permits   []time.Duration
+	claims    []time.Duration
+	completes []time.Duration
+	bytes     int64
 }
+
+type measureResponse struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *measureResponse) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *measureResponse) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func measureControl(t *testing.T, p *testPlane, paths ...string) *permitMetrics {
 	t.Helper()
@@ -60,8 +74,19 @@ func measureControl(t *testing.T, p *testPlane, paths ...string) *permitMetrics 
 	metrics := &permitMetrics{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		proxy.ServeHTTP(w, r)
+		response := &measureResponse{ResponseWriter: w}
+		proxy.ServeHTTP(response, r)
 		permit := strings.HasSuffix(r.URL.Path, "/permit")
+		if response.status == 200 {
+			metrics.mu.Lock()
+			switch {
+			case strings.HasSuffix(r.URL.Path, "/claim"):
+				metrics.claims = append(metrics.claims, time.Since(start))
+			case strings.HasSuffix(r.URL.Path, "/complete"):
+				metrics.completes = append(metrics.completes, time.Since(start))
+			}
+			metrics.mu.Unlock()
+		}
 		if permit || strings.HasSuffix(r.URL.Path, "/finish") {
 			metrics.mu.Lock()
 			metrics.bytes += max(r.ContentLength, 0)

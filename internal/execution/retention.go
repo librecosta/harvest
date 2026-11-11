@@ -126,6 +126,7 @@ type StreamStatus struct {
 	MaxConsumerLag   int64      `json:"max_consumer_lag"`
 	ExpiredConsumers int        `json:"expired_consumers"`
 	LastPrune        *time.Time `json:"last_prune,omitempty"`
+	ReplayAgeCutoff  *time.Time `json:"replay_age_cutoff,omitempty"`
 	Warning          string     `json:"warning,omitempty"`
 }
 
@@ -159,6 +160,7 @@ func (e *Engine) resultStorage(ctx context.Context, p config.Principal, stream s
 		if head.LastPrunedAt.After(time.Unix(0, 0)) {
 			s.LastPrune = &head.LastPrunedAt
 		}
+		oldestACK := head.LastPosition
 		for _, c := range consumers {
 			s.MaxConsumerLag = max(s.MaxConsumerLag, head.LastPosition-c.AckPosition)
 			owner, ok := e.consumerPolicies[c.Principal]
@@ -166,9 +168,22 @@ func (e *Engine) resultStorage(ctx context.Context, p config.Principal, stream s
 				c.ResetRequired || c.AckPosition < head.MinPosition-1 || c.Epoch != head.Epoch ||
 				(c.ResetID != nil && !resetLive(c, head, now)) {
 				s.ExpiredConsumers++
+				continue
 			}
+			oldestACK = min(oldestACK, c.AckPosition)
 		}
 		r := e.retention
+		if oldestACK < head.LastPosition {
+			at, err := db.ChangeEventCommittedAt(ctx, q.ChangeEventCommittedAtParams{Stream: stream, Position: oldestACK + 1})
+			if err != nil {
+				return out, err
+			}
+			cutoff := at.UTC().AddDate(0, 0, r.EventDays)
+			s.ReplayAgeCutoff = &cutoff
+			if !cutoff.After(now.Add(24*time.Hour)) || head.LastPosition-oldestACK >= r.EventRows*4/5 {
+				s.Warning = "consumer_replay_window_low"
+			}
+		}
 		if s.EventRows > r.EventRows || s.EventBytes > r.EventBytes || s.HistoryRows > r.HistoryRows || s.HistoryBytes > r.HistoryBytes {
 			s.Warning = "retention_pressure"
 		}

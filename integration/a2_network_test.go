@@ -248,6 +248,8 @@ type fakeProxy struct {
 	secret   string
 	status   atomic.Int32
 	connects atomic.Int64
+	outbound atomic.Int64
+	inbound  atomic.Int64
 	mu       sync.Mutex
 	open     map[net.Conn]struct{}
 	wg       sync.WaitGroup
@@ -332,16 +334,27 @@ func (p *fakeProxy) target(address string) net.Conn {
 	return dest
 }
 
-func tunnel(client, dest net.Conn, fromClient io.Reader) {
+func (p *fakeProxy) tunnel(client, dest net.Conn, fromClient io.Reader) {
 	defer dest.Close()
 	var wg sync.WaitGroup
 	wg.Go(func() {
-		_, _ = io.Copy(dest, fromClient)
+		_, _ = io.Copy(countProxyBytes{dest, &p.outbound}, fromClient)
 		dest.Close()
 	})
-	_, _ = io.Copy(client, dest)
+	_, _ = io.Copy(countProxyBytes{client, &p.inbound}, dest)
 	client.Close()
 	wg.Wait()
+}
+
+type countProxyBytes struct {
+	io.Writer
+	bytes *atomic.Int64
+}
+
+func (w countProxyBytes) Write(p []byte) (int, error) {
+	n, err := w.Writer.Write(p)
+	w.bytes.Add(int64(n))
+	return n, err
 }
 
 func (p *fakeProxy) socks(c net.Conn) {
@@ -376,7 +389,7 @@ func (p *fakeProxy) socks(c net.Conn) {
 		dest.Close()
 		return
 	}
-	tunnel(c, dest, c)
+	p.tunnel(c, dest, c)
 }
 
 func (p *fakeProxy) http(c net.Conn) {
@@ -403,7 +416,7 @@ func (p *fakeProxy) http(c net.Conn) {
 		dest.Close()
 		return
 	}
-	tunnel(c, dest, reader)
+	p.tunnel(c, dest, reader)
 }
 
 func (p *fakeProxy) authorized(req *http.Request) bool {

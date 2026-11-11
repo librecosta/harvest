@@ -73,6 +73,22 @@ func (q *Queries) AddChangeTotals(ctx context.Context, arg AddChangeTotalsParams
 	return err
 }
 
+const changeEventCommittedAt = `-- name: ChangeEventCommittedAt :one
+SELECT committed_at FROM harvest.change_events WHERE stream = $1 AND position = $2
+`
+
+type ChangeEventCommittedAtParams struct {
+	Stream   string `json:"stream"`
+	Position int64  `json:"position"`
+}
+
+func (q *Queries) ChangeEventCommittedAt(ctx context.Context, arg ChangeEventCommittedAtParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, changeEventCommittedAt, arg.Stream, arg.Position)
+	var committed_at time.Time
+	err := row.Scan(&committed_at)
+	return committed_at, err
+}
+
 const changeEventPage = `-- name: ChangeEventPage :many
 SELECT stream, position, id, action, target_id, capability, output_schema, scope_key, tombstone_scope, observation_id, committed_at, stored_bytes FROM harvest.change_events
 WHERE stream = $1 AND position > $2::bigint
