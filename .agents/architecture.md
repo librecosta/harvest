@@ -55,3 +55,5 @@ the checkout. The request cancels the same context used for OS signals.
 - [B1 acceptance](../docs/harvest-v0.1-b1-acceptance.md)
 - [B2 implementation scope](../docs/harvest-v0.1-b2-web-discovery-enrichment.md)
 - [B2 acceptance](../docs/harvest-v0.1-b2-acceptance.md)
+- [C Steam integration contract](../docs/harvest-v0.1-c-steam-provider.md)
+- [C acceptance](../docs/harvest-v0.1-c-acceptance.md)

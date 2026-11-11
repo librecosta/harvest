@@ -17,10 +17,19 @@ type Operations struct {
 	Workers         []WorkerStatus       `json:"workers"`
 	Quota           []q.QuotaSummaryRow  `json:"quota,omitempty"`
 	RetainedPermits int64                `json:"retained_permits"`
+	SteamSources    []SteamSourceStatus  `json:"steam_sources,omitempty"`
 	DBPressure      DBPressure           `json:"db_pressure"`
 	Draining        bool                 `json:"draining"`
 	Results         ResultStorage        `json:"results"`
 	NetworkPolicy   PolicyStatus         `json:"network_policy"`
+}
+
+type SteamSourceStatus struct {
+	Capability    string `json:"capability"`
+	Class         string `json:"class"`
+	ProviderQuota string `json:"provider_bucket"`
+	AccountQuota  string `json:"account_bucket"`
+	RecentPermits int64  `json:"recent_permits"`
 }
 
 type WorkerStatus struct {
@@ -97,9 +106,45 @@ func (e *Engine) Operations(ctx context.Context, p config.Principal, namespace s
 		out.RetainedPermits, err = e.queries.QuotaPermitCount(ctx, keys)
 	}
 	if err == nil {
+		out.SteamSources, err = e.steamSourceStatus(ctx, p, namespace)
+	}
+	if err == nil {
 		out.Results, err = e.resultStorage(ctx, p, namespace)
 	}
 	return out, err
+}
+
+func (e *Engine) steamSourceStatus(ctx context.Context, p config.Principal, namespace string) ([]SteamSourceStatus, error) {
+	var sources []SteamSourceStatus
+	var capabilities []string
+	for _, rule := range e.network.Sources {
+		if rule.Namespace != namespace || !canCapability(p, rule.Capability) {
+			continue
+		}
+		var class string
+		switch rule.Capability {
+		case "steam.details":
+			class = "storefront"
+		case "steam.news", "steam.players":
+			class = "official_api"
+		default:
+			continue
+		}
+		capabilities = append(capabilities, rule.Capability)
+		sources = append(sources, SteamSourceStatus{Capability: rule.Capability, Class: class, ProviderQuota: rule.ProviderBucket, AccountQuota: rule.AccountBucket})
+	}
+	if len(sources) == 0 {
+		return nil, nil
+	}
+	counts, err := e.queries.RecentCapabilityPermitCounts(ctx, q.RecentCapabilityPermitCountsParams{Namespace: namespace, Capabilities: capabilities})
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range counts {
+		i := slices.IndexFunc(sources, func(s SteamSourceStatus) bool { return s.Capability == c.Capability })
+		sources[i].RecentPermits = c.Issued
+	}
+	return sources, nil
 }
 
 func (e *Engine) visibleNetwork(p config.Principal, namespace string) ([]string, []string) {

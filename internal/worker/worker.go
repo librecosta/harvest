@@ -144,8 +144,11 @@ func execute(ctx context.Context, api client, registry *provider.Registry, pool 
 		if claim.Network == nil {
 			return
 		}
-		session := pool.Session(workCtx, *claim.Network, *cap.Network, claim.Task.Namespace, cap.Capability, permitGate{api, claim, &policyChanged},
-			egress.WebDestination{ID: claim.Task.TargetID, Origin: claim.Task.ExternalKey, Path: claim.Task.WebPath})
+		target := egress.WebDestination{ID: claim.Task.TargetID, Origin: claim.Task.ExternalKey, Path: claim.Task.WebPath}
+		if cap.Network.Steam {
+			target.SteamURI = provider.SteamRequestURI(cap.Capability, claim.Task.ExternalKey, claim.Task.Params)
+		}
+		session := pool.Session(workCtx, *claim.Network, *cap.Network, claim.Task.Namespace, cap.Capability, permitGate{api, claim, &policyChanged}, target)
 		defer session.Close()
 		network = session.Client()
 	}

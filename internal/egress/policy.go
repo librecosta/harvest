@@ -66,6 +66,7 @@ type Source struct {
 	Candidate      bool   // An immutable homepage Observation can authorize the first path.
 	Robots         bool   // The control plane checks current Robots policy before issuing a permit.
 	RDAP           bool
+	Steam          bool
 	FixedPath      string // Exact fixed-source path. Redirects are disabled.
 	FixtureNetwork *FixtureNetwork
 	AllowDirect    bool
@@ -80,6 +81,9 @@ type Source struct {
 func (s Source) Valid() bool {
 	if len(s.Origins) > 8 || s.MaxRequests < 1 || s.MaxRequests > 32 ||
 		s.MaxBodyBytes < 1 || s.MaxBodyBytes > 2<<20 || len(s.ContentTypes) < 1 || len(s.ContentTypes) > 8 {
+		return false
+	}
+	if s.Steam && (s.RDAP || s.WebMethod != "" || s.FixedPath == "" || len(s.Origins) != 1 || !strings.HasPrefix(s.Origins[0], "https://") || s.Fixture || s.Replay || s.MaxRequests != 1) {
 		return false
 	}
 	if s.RDAP {

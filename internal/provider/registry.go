@@ -84,6 +84,7 @@ type Capability struct {
 	MinInterval     time.Duration
 	Timeout         time.Duration
 	Partial         bool
+	PointInTimeOnly bool
 	NormalizeParams func(jsontext.Value) (jsontext.Value, error)
 	NormalizeOutput func(jsontext.Value) (jsontext.Value, error)
 	Observation     *ObservationPolicy

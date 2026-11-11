@@ -13,12 +13,13 @@ import (
 const MaxWebRedirects = 3
 
 var (
-	ErrTLSName      = errors.New("tls_name_mismatch")
-	ErrTLSExpired   = errors.New("tls_expired")
-	ErrTLSUntrusted = errors.New("tls_untrusted")
-	ErrTLSVerify    = errors.New("tls_verification_failed")
-	ErrProxy        = errors.New("proxy_unavailable")
-	ErrResponse     = errors.New("invalid_source_response")
+	ErrTLSName         = errors.New("tls_name_mismatch")
+	ErrTLSExpired      = errors.New("tls_expired")
+	ErrTLSUntrusted    = errors.New("tls_untrusted")
+	ErrTLSVerify       = errors.New("tls_verification_failed")
+	ErrProxy           = errors.New("proxy_unavailable")
+	ErrResponse        = errors.New("invalid_source_response")
+	ErrUpstreamBlocked = errors.New("upstream_blocked")
 )
 
 // WebTarget permits the canonical Target's standard HTTP(S) endpoint only.

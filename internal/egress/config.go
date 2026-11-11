@@ -60,4 +60,5 @@ type QuotaConfig struct {
 	Burst       int64  `mapstructure:"burst" json:"burst"`
 	PerMinute   int64  `mapstructure:"per_minute" json:"per_minute"`
 	Concurrency int64  `mapstructure:"concurrency" json:"concurrency"`
+	DailyLimit  int64  `mapstructure:"daily_limit" json:"daily_limit,omitempty"`
 }

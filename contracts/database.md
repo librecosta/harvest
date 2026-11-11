@@ -65,7 +65,19 @@ bucket across Workers.
 The configured global bucket limits issuance across all Workers. Permit rows
 remain for six minutes after expiry for bounded replay protection, then the
 server removes batches of 256. Bucket usage aggregates reset at UTC midnight.
-Bucket balances and source cooldowns survive that reset.
+Bucket balances and source cooldowns survive that reset. A quota with
+`daily_limit` also uses the UTC-day issuance counter as a hard cap. The
+Permit transaction checks and debits it under the existing bucket lock.
+Replay uses the original receipt and does not debit again. Claim admission
+leaves work queued when the source account has reached its daily limit.
+Daily-limited permits cannot extend beyond the end of their UTC day.
+
+Steam permits also bind the fixed HTTPS origin, capability path and
+canonical keyless query to the immutable AppID, parameters and Attempt.
+The ledger stores the intent digest. Steam API sources share an account
+budget across Workers and remain independent of the Storefront provider
+bucket. The policy binding ledger preserves these shared identities across
+source removal and namespace changes.
 
 The explicit `policy init` command creates the singleton network policy and
 missing quota rows atomically. Existing rows retain balances, timestamps,

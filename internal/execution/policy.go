@@ -97,6 +97,8 @@ func (e *Engine) validatePolicy(c egress.NetworkConfig) error {
 		}
 	}
 	var rdapAccount string
+	var storeProvider, apiProvider, apiAccount string
+	storeAccounts := make(map[string]bool)
 	for _, rule := range c.Sources {
 		cap, ok := e.Registry.Capability(rule.Capability)
 		if !ok || cap.Execute == nil || cap.Network == nil {
@@ -108,6 +110,21 @@ func (e *Engine) validatePolicy(c egress.NetworkConfig) error {
 			return errors.New("network source lacks a matching Worker grant")
 		}
 		r := c.Routes[slices.IndexFunc(c.Routes, func(r egress.RouteConfig) bool { return r.Profile == rule.Profile })]
+		if cap.Network.Steam {
+			if rule.Capability == "steam.details" {
+				if storeProvider != "" && storeProvider != rule.ProviderBucket {
+					return errors.New("Steam Storefront sources must share a provider quota")
+				}
+				storeProvider = rule.ProviderBucket
+				storeAccounts[rule.AccountBucket] = true
+			} else {
+				account := c.Quotas[slices.IndexFunc(c.Quotas, func(q egress.QuotaConfig) bool { return q.ID == rule.AccountBucket })]
+				if account.DailyLimit == 0 || apiAccount != "" && (apiAccount != account.ID || apiProvider != rule.ProviderBucket) {
+					return errors.New("Steam official API sources require shared provider and UTC daily account quotas")
+				}
+				apiProvider, apiAccount = rule.ProviderBucket, account.ID
+			}
+		}
 		if cap.Network.RDAP {
 			bucket := c.Quotas[slices.IndexFunc(c.Quotas, func(q egress.QuotaConfig) bool { return q.ID == rule.AccountBucket })]
 			if rdapAccount != "" && rdapAccount != bucket.ID || bucket.Burst > 4 || bucket.PerMinute > 60 || bucket.Concurrency > 2 {
@@ -121,6 +138,9 @@ func (e *Engine) validatePolicy(c egress.NetworkConfig) error {
 		if cap.Network.RequireRegion && !slices.ContainsFunc(r.Paths, func(p egress.PathConfig) bool { return p.Region != "" }) {
 			return errors.New("network route lacks a required egress region")
 		}
+	}
+	if apiProvider != "" && (apiProvider == storeProvider || apiAccount == storeProvider || storeAccounts[apiAccount] || storeAccounts[apiProvider]) {
+		return errors.New("Steam Storefront and official API require distinct provider and account quotas")
 	}
 	return nil
 }
@@ -169,6 +189,17 @@ func extendQuotaBindings(c egress.NetworkConfig, prior map[string]string) (map[s
 		key := "source/" + s.Namespace + "/" + s.Capability
 		if !quota(key+"/provider", s.ProviderBucket, "provider") || !quota(key+"/account", s.AccountBucket, "account") {
 			return nil, ErrPolicyBinding
+		}
+		// Keep Steam's shared budgets when all its sources move to new namespaces.
+		switch s.Capability {
+		case "steam.details":
+			if !quota("steam/storefront/provider", s.ProviderBucket, "provider") {
+				return nil, ErrPolicyBinding
+			}
+		case "steam.news", "steam.players":
+			if !quota("steam/official/provider", s.ProviderBucket, "provider") || !quota("steam/official/account", s.AccountBucket, "account") {
+				return nil, ErrPolicyBinding
+			}
 		}
 	}
 	for _, r := range c.Routes {

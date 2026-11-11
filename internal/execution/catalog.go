@@ -90,6 +90,12 @@ func (e *Engine) resolve(ctx context.Context, db *q.Queries, p config.Principal,
 		return work{}, ErrUnsupported
 	}
 	in.Params = params
+	if cap.Network != nil && cap.Network.Steam {
+		in.Scope, err = provider.NormalizeSteamScope(cap.Capability, params, in.Scope)
+		if err != nil {
+			return work{}, ErrInvalid
+		}
+	}
 	if cap.Network != nil && (cap.Network.WebPath != "" || cap.Network.RDAP) {
 		canonical, _, err := canonicalScope(provider.SegmentScope{Namespace: target.Namespace, Scope: in.Scope})
 		if err != nil {

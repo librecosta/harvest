@@ -80,7 +80,7 @@ func ValidateNetwork(c egress.NetworkConfig) error {
 	quotas := make(map[string]bool)
 	for _, q := range c.Quotas {
 		if !provider.Identifier(q.ID) || quotas[q.ID] || q.Burst < 1 || q.Burst > 64 ||
-			q.PerMinute < 1 || q.PerMinute > 1200 || q.Concurrency < 1 || q.Concurrency > 64 {
+			q.PerMinute < 1 || q.PerMinute > 1200 || q.Concurrency < 1 || q.Concurrency > 64 || q.DailyLimit < 0 || q.DailyLimit > 100_000_000 {
 			return errors.New("invalid or duplicate server quota")
 		}
 		quotas[q.ID] = true

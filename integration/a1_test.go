@@ -292,14 +292,11 @@ func testRegistryAndAuth(t *testing.T, p *testPlane) (uuid.UUID, uuid.UUID) {
 		for _, cap := range description.Capabilities {
 			if cap.Status == "executable" {
 				executable++
-				if cap.Capability != fixtureOffer.Capability && description.Provider != "web" {
-					t.Fatal("unimplemented provider advertised execution")
-				}
 			}
 		}
 	}
-	if executable != 8 {
-		t.Fatal("expected the fixture and seven compiled Web offers")
+	if executable != 11 {
+		t.Fatal("expected the fixture, seven Web and three Steam offers")
 	}
 	steam := p.register("steam", "app", "000570", "public")
 	if p.register("steam", "app", "570", "public") != steam {
@@ -316,8 +313,8 @@ func testRegistryAndAuth(t *testing.T, p *testPlane) (uuid.UUID, uuid.UUID) {
 	p.call("POST", "/api/v1/targets", "operator", "", execution.TargetInput{
 		Provider: "steam", ResourceType: "app", ExternalKey: "4294967296", Namespace: "public",
 	}, nil, 400)
-	unsupported := execution.Request{TargetID: steam, Capability: "steam.players", RequestSchema: 1, Params: jsontext.Value("{}")}
-	p.call("POST", "/api/v1/jobs", "operator", "no-provider", execution.Submit{Request: &unsupported}, nil, 409)
+	missingEgress := execution.Request{TargetID: steam, Capability: "steam.players", RequestSchema: 1, Params: jsontext.Value("{}")}
+	p.call("POST", "/api/v1/jobs", "operator", "missing-egress", execution.Submit{Request: &missingEgress}, nil, 400)
 	target, private := p.register("fixture", "key", "ALPHA", "public"), p.register("fixture", "key", "alpha", "private")
 	p.call("GET", "/api/v1/targets/"+private.String(), "public_reader", "", nil, nil, 404)
 	p.call("GET", "/api/v1/jobs?namespace=private", "public_reader", "", nil, nil, 403)

@@ -122,9 +122,9 @@ func (e *Engine) dispatchOffers(ctx context.Context, db *q.Queries, p config.Pri
 			}
 		}
 	}
-	var cooling []string
+	var blocked []q.UnavailableQuotaAccountsRow
 	if len(accounts) != 0 {
-		cooling, err = db.CoolingQuotaKeys(ctx, accounts)
+		blocked, err = e.unavailableAccounts(ctx, db, accounts)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -142,7 +142,7 @@ func (e *Engine) dispatchOffers(ctx context.Context, db *q.Queries, p config.Pri
 			continue
 		}
 		for _, rule := range e.network.Sources {
-			if rule.Capability != name || !canNamespace(p, rule.Namespace) || slices.Contains(cooling, rule.AccountBucket) {
+			if rule.Capability != name || !canNamespace(p, rule.Namespace) || slices.ContainsFunc(blocked, func(row q.UnavailableQuotaAccountsRow) bool { return row.Key == rule.AccountBucket }) {
 				continue
 			}
 			plan, ready := e.plan(p, rule, "", paths)
@@ -161,6 +161,18 @@ func (e *Engine) dispatchOffers(ctx context.Context, db *q.Queries, p config.Pri
 	return local, network, nil
 }
 
+func (e *Engine) unavailableAccounts(ctx context.Context, db *q.Queries, keys []string) ([]q.UnavailableQuotaAccountsRow, error) {
+	slices.Sort(keys)
+	keys = slices.Compact(keys)
+	limits := make([]int64, len(keys))
+	for i, key := range keys {
+		if index := slices.IndexFunc(e.network.Quotas, func(cfg egress.QuotaConfig) bool { return cfg.ID == key }); index >= 0 {
+			limits[i] = e.network.Quotas[index].DailyLimit
+		}
+	}
+	return db.UnavailableQuotaAccounts(ctx, q.UnavailableQuotaAccountsParams{Keys: keys, DailyLimits: limits})
+}
+
 func (e *Engine) networkWaiting(ctx context.Context, job q.HarvestJob, cap provider.Capability) (string, error) {
 	if e.policyUncertain {
 		return "egress_policy_unavailable", nil
@@ -169,11 +181,14 @@ func (e *Engine) networkWaiting(ctx context.Context, job q.HarvestJob, cap provi
 	if rule.Profile == "" {
 		return "egress_policy_unavailable", nil
 	}
-	cooling, err := e.queries.CoolingQuotaKeys(ctx, []string{rule.AccountBucket})
+	blocked, err := e.unavailableAccounts(ctx, e.queries, []string{rule.AccountBucket})
 	if err != nil {
 		return "", err
 	}
-	if len(cooling) != 0 {
+	if len(blocked) != 0 {
+		if blocked[0].DailyExhausted {
+			return "daily_quota_exhausted", nil
+		}
 		return "upstream_cooldown", nil
 	}
 	var scope provider.Scope

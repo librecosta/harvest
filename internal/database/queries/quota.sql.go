@@ -12,31 +12,6 @@ import (
 	"uuid"
 )
 
-const coolingQuotaKeys = `-- name: CoolingQuotaKeys :many
-SELECT key FROM harvest.quota_buckets
-WHERE key = ANY($1::text[]) AND cooldown_until > statement_timestamp()
-`
-
-func (q *Queries) CoolingQuotaKeys(ctx context.Context, keys []string) ([]string, error) {
-	rows, err := q.db.Query(ctx, coolingQuotaKeys, keys)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []string{}
-	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
-			return nil, err
-		}
-		items = append(items, key)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const countActiveQuota = `-- name: CountActiveQuota :many
 SELECT k.key::text AS key, count(*) AS active
 FROM harvest.quota_permits p
@@ -414,6 +389,46 @@ func (q *Queries) QuotaSummary(ctx context.Context, keys []string) ([]QuotaSumma
 	return items, nil
 }
 
+const recentCapabilityPermitCounts = `-- name: RecentCapabilityPermitCounts :many
+SELECT j.capability, count(*) AS issued
+FROM harvest.quota_permits p
+JOIN harvest.attempts a ON a.id = p.attempt_id
+JOIN harvest.jobs j ON j.id = a.job_id
+WHERE p.expires_at > statement_timestamp() - interval '6 minutes'
+  AND j.namespace = $1 AND j.capability = ANY($2::text[])
+GROUP BY j.capability
+`
+
+type RecentCapabilityPermitCountsParams struct {
+	Namespace    string   `json:"namespace"`
+	Capabilities []string `json:"capabilities"`
+}
+
+type RecentCapabilityPermitCountsRow struct {
+	Capability string `json:"capability"`
+	Issued     int64  `json:"issued"`
+}
+
+func (q *Queries) RecentCapabilityPermitCounts(ctx context.Context, arg RecentCapabilityPermitCountsParams) ([]RecentCapabilityPermitCountsRow, error) {
+	rows, err := q.db.Query(ctx, recentCapabilityPermitCounts, arg.Namespace, arg.Capabilities)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RecentCapabilityPermitCountsRow{}
+	for rows.Next() {
+		var i RecentCapabilityPermitCountsRow
+		if err := rows.Scan(&i.Capability, &i.Issued); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const recordQuotaOutcome = `-- name: RecordQuotaOutcome :exec
 UPDATE harvest.quota_buckets SET succeeded = succeeded + $1::bigint,
     refused = refused + $2::bigint, failed = failed + $3::bigint,
@@ -466,6 +481,46 @@ type ResetQuotaMetricsParams struct {
 func (q *Queries) ResetQuotaMetrics(ctx context.Context, arg ResetQuotaMetricsParams) error {
 	_, err := q.db.Exec(ctx, resetQuotaMetrics, arg.WindowStart, arg.Keys)
 	return err
+}
+
+const unavailableQuotaAccounts = `-- name: UnavailableQuotaAccounts :many
+SELECT b.key, (($1::bigint[])[q.ord] > 0 AND b.issued >= ($1::bigint[])[q.ord]
+    AND b.metrics_from = date_trunc('day', statement_timestamp(), 'UTC'))::boolean AS daily_exhausted
+FROM unnest($2::text[]) WITH ORDINALITY AS q(key, ord)
+JOIN harvest.quota_buckets b ON b.key = q.key
+WHERE b.cooldown_until > statement_timestamp()
+   OR (($1::bigint[])[q.ord] > 0 AND b.issued >= ($1::bigint[])[q.ord]
+       AND b.metrics_from = date_trunc('day', statement_timestamp(), 'UTC'))
+`
+
+type UnavailableQuotaAccountsParams struct {
+	DailyLimits []int64  `json:"daily_limits"`
+	Keys        []string `json:"keys"`
+}
+
+type UnavailableQuotaAccountsRow struct {
+	Key            string `json:"key"`
+	DailyExhausted bool   `json:"daily_exhausted"`
+}
+
+func (q *Queries) UnavailableQuotaAccounts(ctx context.Context, arg UnavailableQuotaAccountsParams) ([]UnavailableQuotaAccountsRow, error) {
+	rows, err := q.db.Query(ctx, unavailableQuotaAccounts, arg.DailyLimits, arg.Keys)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []UnavailableQuotaAccountsRow{}
+	for rows.Next() {
+		var i UnavailableQuotaAccountsRow
+		if err := rows.Scan(&i.Key, &i.DailyExhausted); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const webRedirectHop = `-- name: WebRedirectHop :one

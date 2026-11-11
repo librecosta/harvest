@@ -15,6 +15,7 @@ import (
 	"github.com/librecosta/harvest/internal/config"
 	q "github.com/librecosta/harvest/internal/database/queries"
 	"github.com/librecosta/harvest/internal/egress"
+	"github.com/librecosta/harvest/internal/provider"
 )
 
 const unitsPerToken = int64(time.Minute / time.Microsecond)
@@ -90,6 +91,17 @@ func (e *Engine) Permit(ctx context.Context, p config.Principal, id uuid.UUID, i
 		var hop *int16
 		var registryDomain, endpoint string
 		switch {
+		case cap.Network.Steam:
+			target, err := db.Target(ctx, q.TargetParams{ID: job.TargetID, Namespaces: []string{job.Namespace}})
+			if err != nil {
+				return egress.Grant{}, err
+			}
+			uri := provider.SteamRequestURI(job.Capability, target.ExternalKey, job.Params)
+			if uri == "" || in.RequestURI != uri || in.Origin != 0 || in.TargetID != target.ID || target.State != "active" ||
+				target.Provider != "steam" || target.ResourceType != "app" || in.Method != http.MethodGet || in.RDAPStage != 0 ||
+				in.Previous != (uuid.UUID{}) || in.Destination != "" {
+				return egress.Grant{}, ErrForbidden
+			}
 		case cap.Network.RDAP:
 			target, err := db.Target(ctx, q.TargetParams{ID: job.TargetID, Namespaces: []string{job.Namespace}})
 			if err != nil {
@@ -267,6 +279,14 @@ func (e *Engine) availableQuota(buckets []q.HarvestQuotaBucket, counts []q.Count
 		cfg := e.network.Quotas[i]
 		tokens := refillQuota(cfg, b, now)
 		wait := b.CooldownUntil.Sub(now)
+		day := now.UTC().Truncate(24 * time.Hour)
+		if cfg.DailyLimit > 0 {
+			untilReset := day.Add(24 * time.Hour).Sub(now)
+			// A daily-limited grant must expire inside the UTC day it debits.
+			if untilReset <= egress.MaxPermitTime || !b.MetricsFrom.Before(day) && b.Issued >= cfg.DailyLimit {
+				wait = max(wait, untilReset)
+			}
+		}
 		if tokens < unitsPerToken {
 			deficit := unitsPerToken - tokens
 			wait = max(wait, time.Duration((deficit+cfg.PerMinute-1)/cfg.PerMinute)*time.Microsecond)

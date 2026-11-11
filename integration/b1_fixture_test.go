@@ -58,7 +58,7 @@ func webFixtureNetwork() *egress.FixtureNetwork {
 			switch {
 			case name == "dns.google.":
 				return []netip.Addr{netip.MustParseAddr(dohPin)}, nil
-			case name == "data.iana.org.":
+			case name == "data.iana.org." || name == "store.steampowered.com." || name == "api.steampowered.com.":
 				return []netip.Addr{netip.MustParseAddr(webPin)}, nil
 			case name == "private-registry.example.com.":
 				return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil

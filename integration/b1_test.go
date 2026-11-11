@@ -30,6 +30,7 @@ func configureWeb(t *testing.T, p *testPlane, a, b *fakeProxy, offers []provider
 		capabilities = append(capabilities, offer.Capability)
 	}
 	withRDAP := slices.Contains(capabilities, "web.rdap")
+	withSteam := slices.Contains(capabilities, "steam.details")
 	for _, g := range []struct{ name, namespaces, profiles string }{
 		{"web_a", "web_direct, web_connect, web_hold, web_throttle", "local, connect"},
 		{"web_b", "web_socks, web_hold, web_tls, web_tls403", "socks"},
@@ -63,15 +64,27 @@ func configureWeb(t *testing.T, p *testPlane, a, b *fakeProxy, offers []provider
 	for i, ns := range namespaces {
 		profile := []string{"local", "connect", "socks", "connect", "local", "connect", "socks", "socks"}[i]
 		for _, offer := range offers {
-			account := ns
+			account, providerBucket := ns, "web_provider"
 			if offer.Capability == "web.rdap" {
 				account = "rdap_account"
 			}
-			fmt.Fprintf(&network, "    - {capability: %s, namespace: %s, profile: %s, provider_bucket: web_provider, account_bucket: %s}\n",
-				offer.Capability, ns, profile, account)
+			switch offer.Capability {
+			case "steam.details":
+				account, providerBucket = "steam_store_account", "steam_store"
+			case "steam.news", "steam.players":
+				account, providerBucket = "steam_official", "steam_api"
+			}
+			fmt.Fprintf(&network, "    - {capability: %s, namespace: %s, profile: %s, provider_bucket: %s, account_bucket: %s}\n",
+				offer.Capability, ns, profile, providerBucket, account)
 		}
 	}
 	fmt.Fprintln(&network, "  quotas:")
+	if withSteam {
+		fmt.Fprintln(&network, "    - {id: steam_store, burst: 1, per_minute: 30, concurrency: 1}")
+		fmt.Fprintln(&network, "    - {id: steam_store_account, burst: 8, per_minute: 1200, concurrency: 2}")
+		fmt.Fprintln(&network, "    - {id: steam_api, burst: 8, per_minute: 1200, concurrency: 2}")
+		fmt.Fprintln(&network, "    - {id: steam_official, burst: 8, per_minute: 1200, concurrency: 2, daily_limit: 200}")
+	}
 	if withRDAP {
 		fmt.Fprintln(&network, "    - {id: rdap_account, burst: 4, per_minute: 60, concurrency: 2}")
 	}
@@ -85,7 +98,8 @@ func configureWeb(t *testing.T, p *testPlane, a, b *fakeProxy, offers []provider
 		var data strings.Builder
 		fmt.Fprintf(&data, "control_url: %q\ntoken: %q\nconcurrency: 1\noffers:\n", "http://"+p.address, p.tokens[name])
 		for _, offer := range offers {
-			fmt.Fprintf(&data, "  - {capability: %s, request_schema: 1, output_schema: 1, implementation: web_v1}\n", offer.Capability)
+			fmt.Fprintf(&data, "  - {capability: %s, request_schema: %d, output_schema: %d, implementation: %s}\n",
+				offer.Capability, offer.RequestSchema, offer.OutputSchema, offer.Implementation)
 		}
 		fmt.Fprintf(&data, `egress:
   endpoints:

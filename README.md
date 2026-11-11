@@ -163,6 +163,31 @@ bucket with a maximum of 60 requests/minute, burst 4 and concurrency 2. The
 control plane shares its 24-hour bootstrap cache across Workers. See the
 [B2 acceptance record](docs/harvest-v0.1-b2-acceptance.md) for bounds and measured costs.
 
+## Steam acquisition
+
+Register a positive uint32 AppID as a `steam.app` Target. Enable the
+`steam_v1` Worker offers with request and output schema 1. Select an
+`egress_region` and configure the PostgreSQL source policy for each namespace
+and capability.
+
+| Capability | Parameters | Suggested explicit schedule |
+| --- | --- | --- |
+| `steam.details` | `{"language":"schinese","store_country":"CN"}`. Languages are `english` and `schinese`, and store countries are `CN`, `US`, and `HK`. | 24 hours per language and store country |
+| `steam.news` | `{}` for ten items or `{"count":5}` for a smaller recent page. | 6–12 hours |
+| `steam.players` | `{}`. Use a `point_in_time` schedule for selected apps. | 30–60 minutes |
+
+Store country and locale identify the result independently of the proxy exit.
+Details, price and media links have separate current values. Each Attempt
+uses at most one GET. News and Players use the public keyless API methods.
+The Provider offers a bounded News page and point-in-time Players samples.
+
+Use one shared Storefront provider bucket with `per_minute: 30`, `burst: 1`
+and `concurrency: 1` initially. Give News and Players a separate shared
+provider bucket and a shared account bucket with a positive `daily_limit`.
+The account ledger counts issued permits from midnight UTC independently of
+its minute rate. Size the account limit for the upstream allowance and any
+use outside this Harvest instance. See the [C acceptance record](docs/harvest-v0.1-c-acceptance.md).
+
 ## Docker
 
 ```sh

@@ -110,6 +110,9 @@ func (e *Engine) CreateSchedule(ctx context.Context, p config.Principal, in Sche
 		r := in.Recurrence
 		r.AnchorAt = pgTime(r.AnchorAt)
 		r.Cron = strings.Join(strings.Fields(r.Cron), " ")
+		if w.capability.PointInTimeOnly && r.Policy != "point_in_time" {
+			return q.HarvestSchedule{}, ErrInvalid
+		}
 		c, err := parseCadence(r, w.capability.MinInterval)
 		if err != nil {
 			return q.HarvestSchedule{}, err
@@ -182,6 +185,9 @@ func (e *Engine) EditSchedule(ctx context.Context, p config.Principal, id uuid.U
 		if patch.Request != nil || patch.Recurrence != nil {
 			if cap.Execute == nil || cap.Key() != s.ExecutionKey {
 				return s, ErrUnsupported
+			}
+			if cap.PointInTimeOnly && r.Policy != "point_in_time" {
+				return s, ErrInvalid
 			}
 			c, err := parseCadence(r, cap.MinInterval)
 			if err != nil {

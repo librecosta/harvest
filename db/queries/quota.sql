@@ -33,9 +33,14 @@ UPDATE harvest.quota_buckets SET metrics_from = sqlc.arg(window_start)::timestam
     latency_le_25 = 0, latency_le_100 = 0, latency_le_1000 = 0
 WHERE key = ANY(sqlc.arg(keys)::text[]);
 
--- name: CoolingQuotaKeys :many
-SELECT key FROM harvest.quota_buckets
-WHERE key = ANY(sqlc.arg(keys)::text[]) AND cooldown_until > statement_timestamp();
+-- name: UnavailableQuotaAccounts :many
+SELECT b.key, ((sqlc.arg(daily_limits)::bigint[])[q.ord] > 0 AND b.issued >= (sqlc.arg(daily_limits)::bigint[])[q.ord]
+    AND b.metrics_from = date_trunc('day', statement_timestamp(), 'UTC'))::boolean AS daily_exhausted
+FROM unnest(sqlc.arg(keys)::text[]) WITH ORDINALITY AS q(key, ord)
+JOIN harvest.quota_buckets b ON b.key = q.key
+WHERE b.cooldown_until > statement_timestamp()
+   OR ((sqlc.arg(daily_limits)::bigint[])[q.ord] > 0 AND b.issued >= (sqlc.arg(daily_limits)::bigint[])[q.ord]
+       AND b.metrics_from = date_trunc('day', statement_timestamp(), 'UTC'));
 
 -- name: DeferQuota :exec
 UPDATE harvest.quota_buckets SET deferred = deferred + 1 WHERE key = ANY(sqlc.arg(keys)::text[]);
@@ -100,3 +105,12 @@ FROM harvest.quota_buckets WHERE key = ANY(sqlc.arg(keys)::text[])
 
 -- name: QuotaPermitCount :one
 SELECT count(*) FROM harvest.quota_permits WHERE bucket_keys && sqlc.arg(keys)::text[];
+
+-- name: RecentCapabilityPermitCounts :many
+SELECT j.capability, count(*) AS issued
+FROM harvest.quota_permits p
+JOIN harvest.attempts a ON a.id = p.attempt_id
+JOIN harvest.jobs j ON j.id = a.job_id
+WHERE p.expires_at > statement_timestamp() - interval '6 minutes'
+  AND j.namespace = sqlc.arg(namespace) AND j.capability = ANY(sqlc.arg(capabilities)::text[])
+GROUP BY j.capability;

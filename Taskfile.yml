@@ -100,4 +100,4 @@ tasks:
   check:containers:
     desc: Verify lifecycle, execution, egress, recovery and live policy on disposable PostgreSQL 18
     cmds:
-      - go test -tags=integration -count=1 -timeout=8m -v ./integration
+      - go test -tags=integration -count=1 -timeout=10m -v ./integration

@@ -79,9 +79,10 @@ type Session struct {
 }
 
 type WebDestination struct {
-	ID     uuid.UUID
-	Origin string
-	Path   string
+	ID       uuid.UUID
+	Origin   string
+	Path     string
+	SteamURI string
 }
 
 type responseContextKey struct{}
@@ -160,7 +161,7 @@ func (c scopedClient) Do(r *http.Request) (*http.Response, error) {
 }
 
 func safeError(err error) error {
-	for _, safe := range []error{ErrPolicy, ErrBudget, ErrDeferred, ErrUnavailable, ErrResponse, ErrRobotsUnknown, ErrRobotsBlocked, ErrCandidate, ErrBootstrapRequired, ErrBootstrapReady, ErrBootstrapUnavailable, ErrRegistryMissing, ErrTLSName, ErrTLSExpired, ErrTLSUntrusted, ErrTLSVerify, ErrProxy, context.Canceled, context.DeadlineExceeded} {
+	for _, safe := range []error{ErrPolicy, ErrBudget, ErrDeferred, ErrUnavailable, ErrResponse, ErrUpstreamBlocked, ErrRobotsUnknown, ErrRobotsBlocked, ErrCandidate, ErrBootstrapRequired, ErrBootstrapReady, ErrBootstrapUnavailable, ErrRegistryMissing, ErrTLSName, ErrTLSExpired, ErrTLSUntrusted, ErrTLSVerify, ErrProxy, context.Canceled, context.DeadlineExceeded} {
 		if errors.Is(err, safe) {
 			return safe
 		}
@@ -192,6 +193,9 @@ func (s *Session) RoundTrip(r *http.Request) (*http.Response, error) {
 	if s.source.FixedPath != "" && (r.URL.EscapedPath() != s.source.FixedPath || r.Method != http.MethodGet) {
 		origin = -1
 	}
+	if s.source.Steam && (r.URL.RequestURI() != s.target.SteamURI || r.Response != nil) {
+		origin = -1
+	}
 	if origin < 0 || (r.Method != http.MethodGet && r.Method != http.MethodHead) ||
 		(r.Host != "" && r.Host != r.URL.Host) || (r.Body != nil && r.Body != http.NoBody) ||
 		r.ContentLength != 0 || len(r.TransferEncoding) != 0 || len(r.Trailer) != 0 ||
@@ -203,7 +207,7 @@ func (s *Session) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 	headerBytes := 0
 	for k, values := range r.Header {
-		if !allowedHeader(k) || ((s.source.WebMethod != "" || s.source.RDAP) && !slices.Contains([]string{"accept", "accept-language", "user-agent"}, strings.ToLower(k))) {
+		if !allowedHeader(k) || ((s.source.WebMethod != "" || s.source.RDAP || s.source.Steam) && !slices.Contains([]string{"accept", "accept-language", "user-agent"}, strings.ToLower(k))) {
 			return nil, ErrPolicy
 		}
 		for _, value := range values {
@@ -286,6 +290,9 @@ func (s *Session) send(ctx context.Context, r *http.Request, path reservation, o
 	if stage != 0 {
 		intent.TargetID, intent.RDAPStage = s.target.ID, stage
 	}
+	if s.source.Steam {
+		intent.TargetID, intent.RequestURI = s.target.ID, s.target.SteamURI
+	}
 	grant, start, err := s.acquire(ctx, intent)
 	if err != nil || grant.RetryMS != 0 {
 		s.pool.release(path, 0, nil, false)
@@ -337,7 +344,7 @@ func (s *Session) send(ctx context.Context, r *http.Request, path reservation, o
 		if wireErr := ctx.Err(); wireErr != nil {
 			return nil, wireErr
 		}
-		if s.source.WebMethod != "" || s.source.RDAP {
+		if s.source.WebMethod != "" || s.source.RDAP || s.source.Steam {
 			var verify *tls.CertificateVerificationError
 			if errors.As(err, &verify) {
 				var invalid x509.CertificateInvalidError
@@ -383,6 +390,13 @@ func (s *Session) send(ctx context.Context, r *http.Request, path reservation, o
 			redirect = RedirectDigest(location.RequestURI())
 		}
 	}
+	media, _, _ := mime.ParseMediaType(res.Header.Get("Content-Type"))
+	if s.source.Steam && res.StatusCode >= 200 && res.StatusCode < 300 && media == "text/html" {
+		_ = res.Body.Close()
+		finish(Usage{Outcome: "denied"}, nil, true)
+		cleanup()
+		return nil, ErrUpstreamBlocked
+	}
 	if outcome == "throttled" || outcome == "denied" {
 		_ = res.Body.Close()
 		usage := Usage{Outcome: outcome}
@@ -394,7 +408,7 @@ func (s *Session) send(ctx context.Context, r *http.Request, path reservation, o
 		res.Body, res.ContentLength = http.NoBody, 0
 		return res, nil
 	}
-	kind, _, _ := mime.ParseMediaType(res.Header.Get("Content-Type"))
+	kind := media
 	if stage == RDAPBootstrap && res.StatusCode == http.StatusOK {
 		if kind != "application/json" {
 			_ = res.Body.Close()
@@ -428,6 +442,9 @@ func (s *Session) send(ctx context.Context, r *http.Request, path reservation, o
 		}
 		finish(Usage{Outcome: outcome}, nil, true)
 		if s.source.FixedPath != "" {
+			if s.source.Steam && res.ContentLength > s.source.MaxBodyBytes {
+				return nil, ErrBudget
+			}
 			return nil, ErrResponse
 		}
 		return nil, ErrPolicy

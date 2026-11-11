@@ -105,8 +105,11 @@ func fixtureRegistry() *provider.Registry {
 	builtins := provider.Builtins()
 	if os.Getenv("HARVEST_TEST_WEB") != "" {
 		for i, builtin := range builtins {
-			if builtin.Name == "web" {
+			switch builtin.Name {
+			case "web":
 				builtins[i] = provider.WebManifest(webFixtureNetwork())
+			case "steam":
+				builtins[i] = provider.SteamManifest(webFixtureNetwork())
 			}
 		}
 	}

@@ -1,5 +1,12 @@
 # Changelog
 
+## V0.1-C
+
+- Enabled Steam Storefront details, Steam News and Current Players with
+  `steam-go` over Attempt-scoped egress and permits.
+- Added scoped Steam price, details, media, news and sample observations.
+- Added shared, persistent UTC-day Permit budgets to PostgreSQL network policy.
+
 ## V0.1-B2
 
 - Enabled bounded Robots, Sitemap, RDAP and asset discovery. Added RSS and

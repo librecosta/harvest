@@ -1,42 +1,20 @@
 package provider
 
 import (
-	"encoding/json/jsontext"
 	"errors"
 	"net"
 	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
 	"golang.org/x/net/idna"
 )
 
 func Builtins() []Manifest {
 	return []Manifest{
-		{
-			Name:      "steam",
-			Resources: []Resource{{"app", steamApp}},
-			Capabilities: []Capability{
-				metadata("steam.details", "app", Normalize[steamDetails]),
-				metadata("steam.news", "app", Normalize[struct{}]),
-				metadata("steam.players", "app", Normalize[struct{}]),
-			},
-		},
+		SteamManifest(nil),
 		WebManifest(nil),
-	}
-}
-
-type steamDetails struct {
-	Language string `json:"language,omitempty"`
-	Country  string `json:"store_country,omitempty"`
-}
-
-func metadata(name, resource string, params func(jsontext.Value) (jsontext.Value, error)) Capability {
-	return Capability{
-		Offer: Offer{name, 1, 1, "planned"}, Resource: resource, MinInterval: time.Minute, Timeout: 30 * time.Second,
-		NormalizeParams: params, NormalizeOutput: Normalize[struct{}],
 	}
 }
 
