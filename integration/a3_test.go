@@ -71,7 +71,7 @@ func upgradeA2(t *testing.T, p *testPlane) {
 	if got := p.cli("migrate", "up", "--config", p.config); got != "Applied 4 Harvest migrations." {
 		t.Fatal(got)
 	}
-	if got := p.cli("migrate", "status", "--config", p.config); got != "1 applied\n2 applied\n3 applied\n4 applied\n5 applied\n6 applied" {
+	if got := p.cli("migrate", "status", "--config", p.config); got != "1 applied\n2 applied\n3 applied\n4 applied\n5 applied\n6 applied\n7 applied" {
 		t.Fatal(got)
 	}
 	if n := a3Count(t, p, `SELECT count(*) FROM harvest.targets t JOIN harvest.schedules s ON s.target_id=t.id

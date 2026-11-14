@@ -153,7 +153,7 @@ type testPlane struct {
 func startFixture(t *testing.T) *testPlane {
 	t.Helper()
 	p := newFixture(t)
-	if got := p.cli("migrate", "up", "--config", p.config); got != "Applied 6 Harvest migrations." {
+	if got := p.cli("migrate", "up", "--config", p.config); got != "Applied 7 Harvest migrations." {
 		t.Fatalf("fresh PG18 migration: %q", got)
 	}
 	return p
