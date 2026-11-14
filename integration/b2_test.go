@@ -474,7 +474,7 @@ now(),now(),'{"title":"B1 page","icons":["https://legacy.example.com/favicon.ico
 		obs, id, make([]byte, 32), uuid.NewV7(), uuid.NewV7())
 	a3Exec(t, p, `INSERT INTO harvest.current_results (stream,target_id,capability,output_schema,scope_key,observation_id,content_hash,position,confirmed_at)
 VALUES ('public',$1,'web.http',1,repeat('0',64),$2,$3,1,now())`, id, obs, make([]byte, 32))
-	if got := p.cli("migrate", "up", "--config", p.config); got != "Applied 1 Harvest migrations." {
+	if got := p.cli("migrate", "up", "--config", p.config); got != "Applied 2 Harvest migrations." {
 		t.Fatal(got)
 	}
 	return id

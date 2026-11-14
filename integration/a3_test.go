@@ -68,7 +68,7 @@ func upgradeA2(t *testing.T, p *testPlane) {
 	a3Exec(t, p, `INSERT INTO harvest.quota_permits (id,attempt_id,operation_id,request_hash,bucket_keys,account_key,max_bytes,expires_at)
 		VALUES ($1,$2,$3,$4,ARRAY['g','p','a','n'],'a',4096,now()+interval '1 day')`, permit, attempt, uuid.NewV7(), hash)
 	expectFailure(t, p.scratch, nil, p.bin, "schema is unavailable or incompatible", "fixture", "serve", "--local", "--config", p.config)
-	if got := p.cli("migrate", "up", "--config", p.config); got != "Applied 4 Harvest migrations." {
+	if got := p.cli("migrate", "up", "--config", p.config); got != "Applied 5 Harvest migrations." {
 		t.Fatal(got)
 	}
 	if got := p.cli("migrate", "status", "--config", p.config); got != "1 applied\n2 applied\n3 applied\n4 applied\n5 applied\n6 applied\n7 applied" {
