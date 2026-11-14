@@ -25,6 +25,11 @@ change-stream cursors and retention. It commits acquisition results under the
 same Attempt fence. `internal/server` runs bounded result pruning with the
 other maintenance loops.
 
+The `steam.catalog` singleton uses one-shot Jobs in a dedicated namespace.
+The Worker adds its Steam key as a request header after the exact URI passes
+the Permit gate. Steam catalog and Storefront Attempts link their successful
+scopes to retained Observations, including unchanged confirmations.
+
 `internal/server` owns the pool, Scheduler, optional embedded worker and
 Fiber. Startup checks schema compatibility before binding. OnListen enables
 readiness and starts managed loops. Shutdown closes admission, stops

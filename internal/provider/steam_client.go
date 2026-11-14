@@ -19,6 +19,7 @@ type steamTransport struct {
 	client   egress.Client
 	maxBytes int64
 	store    *map[string]steamStorePresence
+	validate func([]byte) bool
 }
 
 func (t steamTransport) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -31,7 +32,7 @@ func (t steamTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !jsontext.Value(body).IsValid() || t.store != nil && json.Unmarshal(body, t.store) != nil {
+	if !jsontext.Value(body).IsValid() || t.store != nil && json.Unmarshal(body, t.store) != nil || t.validate != nil && !t.validate(body) {
 		return nil, errSteamJSON
 	}
 	// The guarded body has already returned its permit. The SDK still owns
@@ -41,8 +42,12 @@ func (t steamTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 func newSteamClient(network egress.Client, maxBytes int64, store *map[string]steamStorePresence) (*steam.Client, error) {
+	return newSteamClientWithOptions(network, maxBytes, store, nil)
+}
+
+func newSteamClientWithOptions(network egress.Client, maxBytes int64, store *map[string]steamStorePresence, validate func([]byte) bool, options ...steam.Option) (*steam.Client, error) {
 	client := &http.Client{
-		Transport: steamTransport{client: network, maxBytes: maxBytes, store: store},
+		Transport: steamTransport{client: network, maxBytes: maxBytes, store: store, validate: validate},
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
@@ -59,5 +64,5 @@ func newSteamClient(network egress.Client, maxBytes int64, store *map[string]ste
 			Retry: &steam.TrafficRetryPolicy{Retry: 0, Backoff: steam.DefaultRetryBackoffConfig()},
 		}))
 	}
-	return steam.NewClient(opts...)
+	return steam.NewClient(append(opts, options...)...)
 }

@@ -117,6 +117,11 @@ func (e *Engine) validatePolicy(c egress.NetworkConfig) error {
 				}
 				storeProvider = rule.ProviderBucket
 				storeAccounts[rule.AccountBucket] = true
+			} else if rule.Capability == "steam.catalog" {
+				account := c.Quotas[slices.IndexFunc(c.Quotas, func(q egress.QuotaConfig) bool { return q.ID == rule.AccountBucket })]
+				if account.DailyLimit == 0 {
+					return errors.New("Steam catalog requires a UTC daily account quota")
+				}
 			} else {
 				account := c.Quotas[slices.IndexFunc(c.Quotas, func(q egress.QuotaConfig) bool { return q.ID == rule.AccountBucket })]
 				if account.DailyLimit == 0 || apiAccount != "" && (apiAccount != account.ID || apiProvider != rule.ProviderBucket) {

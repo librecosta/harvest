@@ -88,7 +88,7 @@ func Run(ctx context.Context, cfg config.Worker, registry *provider.Registry, lo
 					started := time.Now()
 					ok, err := api.request(ctx, http.MethodPost, base+"/claim", nil, &claim)
 					if err == nil && ok {
-						execute(life, api, registry, pool, claim, started)
+						execute(life, api, registry, pool, claim, started, cfg.SteamCatalogAPIKey)
 					}
 				}
 				wait(ctx, time.Second+time.Duration(rand.IntN(250))*time.Millisecond)
@@ -127,7 +127,7 @@ func wait(ctx context.Context, duration time.Duration) {
 
 const safetyMargin = 100 * time.Millisecond
 
-func execute(ctx context.Context, api client, registry *provider.Registry, pool *egress.Pool, claim execution.Claim, started time.Time) {
+func execute(ctx context.Context, api client, registry *provider.Registry, pool *egress.Pool, claim execution.Claim, started time.Time, steamCatalogKey string) {
 	cap, ok := registry.Capability(claim.Task.Offer.Capability)
 	if !ok || cap.Execute == nil || cap.Offer != claim.Task.Offer || claim.LeaseMS < 1 {
 		return
@@ -147,6 +147,9 @@ func execute(ctx context.Context, api client, registry *provider.Registry, pool 
 		target := egress.WebDestination{ID: claim.Task.TargetID, Origin: claim.Task.ExternalKey, Path: claim.Task.WebPath}
 		if cap.Network.Steam {
 			target.SteamURI = provider.SteamRequestURI(cap.Capability, claim.Task.ExternalKey, claim.Task.Params)
+		}
+		if cap.Capability == provider.SteamCatalog {
+			target.SteamCatalogKey = steamCatalogKey
 		}
 		session := pool.Session(workCtx, *claim.Network, *cap.Network, claim.Task.Namespace, cap.Capability, permitGate{api, claim, &policyChanged}, target)
 		defer session.Close()

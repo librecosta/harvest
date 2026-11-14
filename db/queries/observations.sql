@@ -30,6 +30,15 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18);
 -- name: ObservationsByID :many
 SELECT * FROM harvest.observations WHERE id = ANY(sqlc.arg(ids)::uuid[]);
 
+-- name: RecordAttemptResults :exec
+UPDATE harvest.attempts SET result_observation_ids=$2 WHERE id=$1;
+
+-- name: AttemptResultObservations :many
+SELECT o.* FROM harvest.attempts a JOIN harvest.observations o ON o.id=ANY(a.result_observation_ids)
+WHERE a.id=sqlc.arg(attempt_id) AND a.job_id=sqlc.arg(job_id) AND o.stream=sqlc.arg(stream)
+ AND o.target_id=sqlc.arg(target_id) AND o.capability=sqlc.arg(capability)
+ORDER BY o.scope_key;
+
 -- name: CurrentRobotsPolicy :one
 SELECT o.data FROM harvest.current_results c
 JOIN harvest.observations o ON o.id = c.observation_id

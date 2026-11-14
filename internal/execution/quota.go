@@ -98,7 +98,7 @@ func (e *Engine) Permit(ctx context.Context, p config.Principal, id uuid.UUID, i
 			}
 			uri := provider.SteamRequestURI(job.Capability, target.ExternalKey, job.Params)
 			if uri == "" || in.RequestURI != uri || in.Origin != 0 || in.TargetID != target.ID || target.State != "active" ||
-				target.Provider != "steam" || target.ResourceType != "app" || in.Method != http.MethodGet || in.RDAPStage != 0 ||
+				target.Provider != "steam" || target.ResourceType != cap.Resource || in.Method != http.MethodGet || in.RDAPStage != 0 ||
 				in.Previous != (uuid.UUID{}) || in.Destination != "" {
 				return egress.Grant{}, ErrForbidden
 			}

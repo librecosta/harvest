@@ -110,7 +110,7 @@ func (e *Engine) CreateSchedule(ctx context.Context, p config.Principal, in Sche
 		r := in.Recurrence
 		r.AnchorAt = pgTime(r.AnchorAt)
 		r.Cron = strings.Join(strings.Fields(r.Cron), " ")
-		if w.capability.PointInTimeOnly && r.Policy != "point_in_time" {
+		if w.capability.Capability == "steam.catalog" || w.capability.PointInTimeOnly && r.Policy != "point_in_time" {
 			return q.HarvestSchedule{}, ErrInvalid
 		}
 		c, err := parseCadence(r, w.capability.MinInterval)

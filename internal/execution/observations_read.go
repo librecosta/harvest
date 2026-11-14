@@ -59,6 +59,23 @@ func observationView(o q.HarvestObservation) ObservationView {
 	}
 }
 
+// JobResults reads the exact successful scope results attached to the accepted
+// Attempt. An unchanged result keeps the original Observation and provenance.
+// The caller must first authorize and load this Job through Engine.Job.
+func (e *Engine) JobResults(ctx context.Context, job q.HarvestJob) ([]ObservationView, error) {
+	if job.AcceptedAttemptID == nil || (job.State != "succeeded" && job.State != "partial") {
+		return nil, nil
+	}
+	rows, err := e.queries.AttemptResultObservations(ctx, q.AttemptResultObservationsParams{
+		AttemptID: *job.AcceptedAttemptID, JobID: job.ID, Stream: job.Namespace, TargetID: job.TargetID, Capability: job.Capability,
+	})
+	var out []ObservationView
+	for _, row := range rows {
+		out = append(out, observationView(row))
+	}
+	return out, err
+}
+
 func validScopeKey(s string) bool {
 	if len(s) != 64 {
 		return false

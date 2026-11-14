@@ -22,12 +22,13 @@ type Principal struct {
 }
 
 type Worker struct {
-	ControlURL     string           `mapstructure:"control_url"`
-	Token          string           `mapstructure:"token"`
-	Offers         []provider.Offer `mapstructure:"offers"`
-	EgressProfiles []string         `mapstructure:"egress_profiles"`
-	Concurrency    int32            `mapstructure:"concurrency"`
-	Egress         egress.Config    `mapstructure:"egress"`
+	SteamCatalogAPIKey string           `mapstructure:"steam_catalog_api_key"`
+	ControlURL         string           `mapstructure:"control_url"`
+	Token              string           `mapstructure:"token"`
+	Offers             []provider.Offer `mapstructure:"offers"`
+	EgressProfiles     []string         `mapstructure:"egress_profiles"`
+	Concurrency        int32            `mapstructure:"concurrency"`
+	Egress             egress.Config    `mapstructure:"egress"`
 }
 
 func LoadWorker(path string) (Worker, error) {
@@ -59,7 +60,17 @@ func validateWorker(w Worker) error {
 		}
 		seen[offer.Capability] = true
 	}
+	if seen[provider.SteamCatalog] && !validSteamCatalogKey(w.SteamCatalogAPIKey) ||
+		!seen[provider.SteamCatalog] && w.SteamCatalogAPIKey != "" {
+		return errors.New("steam.catalog requires a hexadecimal Web API key in the executing Worker YAML")
+	}
 	return validateEgress(w.Egress)
+}
+
+func validSteamCatalogKey(key string) bool {
+	return len(key) == 32 && strings.IndexFunc(key, func(r rune) bool {
+		return !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f' || r >= 'A' && r <= 'F')
+	}) < 0
 }
 
 func privateHost(host string) bool {

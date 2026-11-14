@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json/jsontext"
+	json "encoding/json/v2"
 	"net/url"
 	"slices"
 	"strconv"
@@ -18,11 +19,12 @@ import (
 type steamStorePresence struct {
 	Success bool `json:"success"`
 	Data    struct {
-		AppID     uint32          `json:"steam_appid"`
-		IsFree    *bool           `json:"is_free"`
-		Platforms *steamPlatforms `json:"platforms"`
-		Release   *steamRelease   `json:"release_date"`
-		Price     *steamAmounts   `json:"price_overview"`
+		AppID       uint32          `json:"steam_appid"`
+		IsFree      *bool           `json:"is_free"`
+		RequiredAge jsontext.Value  `json:"required_age"`
+		Platforms   *steamPlatforms `json:"platforms"`
+		Release     *steamRelease   `json:"release_date"`
+		Price       *steamAmounts   `json:"price_overview"`
 	} `json:"data"`
 }
 
@@ -61,6 +63,69 @@ type steamDescription struct {
 	Categories         []steamLabel    `json:"categories,omitempty"`
 	Genres             []steamLabel    `json:"genres,omitempty"`
 	Release            *steamRelease   `json:"release,omitempty"`
+	Content            *steamContent   `json:"content_rating,omitempty"`
+}
+
+type steamContent struct {
+	RequiredAge *int   `json:"required_age,omitempty"`
+	ESRB        string `json:"esrb,omitempty"`
+	PEGI        string `json:"pegi,omitempty"`
+	Descriptors []int  `json:"descriptors,omitempty"`
+}
+
+func readSteamContent(d storefront.AppDetailsData, raw jsontext.Value) *steamContent {
+	v := &steamContent{}
+	var age storefront.FlexibleInt
+	if len(raw) != 0 && string(raw) != "null" && string(raw) != `""` && json.Unmarshal(raw, &age) == nil {
+		n := age.Int()
+		if n >= 0 && n <= 21 {
+			v.RequiredAge = &n
+		}
+	}
+	if ratings, err := d.DecodeRatings(); err == nil {
+		e := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(ratings["esrb"].Rating), " ", ""))
+		switch e {
+		case "E", "E10+", "T", "M", "AO":
+			v.ESRB = e
+		}
+		p := strings.TrimSpace(ratings["pegi"].Rating)
+		switch p {
+		case "3", "7", "12", "16", "18":
+			v.PEGI = p
+		}
+	}
+	if d.ContentDescriptors != nil && len(d.ContentDescriptors.IDs) <= 16 {
+		for _, id := range d.ContentDescriptors.IDs {
+			if id > 0 && id <= 32767 {
+				v.Descriptors = append(v.Descriptors, id)
+			}
+		}
+		slices.Sort(v.Descriptors)
+		v.Descriptors = slices.Compact(v.Descriptors)
+	}
+	if v.RequiredAge == nil && v.ESRB == "" && v.PEGI == "" && len(v.Descriptors) == 0 {
+		return nil
+	}
+	return v
+}
+
+func validSteamContent(v *steamContent) bool {
+	if v == nil {
+		return true
+	}
+	if v.RequiredAge != nil && (*v.RequiredAge < 0 || *v.RequiredAge > 21) ||
+		!slices.Contains([]string{"", "E", "E10+", "T", "M", "AO"}, v.ESRB) ||
+		!slices.Contains([]string{"", "3", "7", "12", "16", "18"}, v.PEGI) || len(v.Descriptors) > 16 {
+		return false
+	}
+	prior := 0
+	for _, id := range v.Descriptors {
+		if id <= prior || id > 32767 {
+			return false
+		}
+		prior = id
+	}
+	return v.RequiredAge != nil || v.ESRB != "" || v.PEGI != "" || len(v.Descriptors) != 0
 }
 
 type steamPrice struct {
@@ -97,7 +162,8 @@ func acquireSteamDetails(ctx context.Context, t Task, network egress.Client) Res
 	source := steamProvenance(t)
 	metadata := steamDescription{steamSource: source, Name: steamText(d.Name, 256), Type: steamText(d.Type, 48),
 		Description: steamText(d.ShortDescription, 1536), SupportedLanguages: steamText(d.SupportedLanguages, 768),
-		Developers: steamNames(d.Developers), Publishers: steamNames(d.Publishers), Platforms: known.Platforms, Release: known.Release}
+		Developers: steamNames(d.Developers), Publishers: steamNames(d.Publishers), Platforms: known.Platforms, Release: known.Release,
+		Content: readSteamContent(d, known.RequiredAge)}
 	if metadata.Release != nil {
 		metadata.Release.Date = steamText(d.ReleaseDate.Date, 128)
 	}
@@ -215,7 +281,7 @@ func normalizeSteamDetails(t Task, scope SegmentScope, state string, data jsonte
 		valid := err == nil && state == "present" && v.steamSource == source && v.Name != "" && validText(v.Name, 256) &&
 			validText(v.Type, 48) && validText(v.Description, 1536) && validText(v.SupportedLanguages, 768) &&
 			(v.Release == nil || validText(v.Release.Date, 128)) && slices.Equal(v.Developers, steamNames(v.Developers)) &&
-			slices.Equal(v.Publishers, steamNames(v.Publishers))
+			slices.Equal(v.Publishers, steamNames(v.Publishers)) && validSteamContent(v.Content)
 		for _, rows := range [][]steamLabel{v.Categories, v.Genres} {
 			valid = valid && len(rows) <= 24 && slices.Equal(rows, sortSteamLabels(slices.Clone(rows)))
 			for _, row := range rows {

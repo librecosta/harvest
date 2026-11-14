@@ -79,10 +79,11 @@ type Session struct {
 }
 
 type WebDestination struct {
-	ID       uuid.UUID
-	Origin   string
-	Path     string
-	SteamURI string
+	ID              uuid.UUID
+	Origin          string
+	Path            string
+	SteamURI        string
+	SteamCatalogKey string
 }
 
 type responseContextKey struct{}
@@ -195,6 +196,9 @@ func (s *Session) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 	if s.source.Steam && (r.URL.RequestURI() != s.target.SteamURI || r.Response != nil) {
 		origin = -1
+	}
+	if s.source.SteamCatalog && s.target.SteamCatalogKey == "" {
+		return nil, ErrPolicy
 	}
 	if origin < 0 || (r.Method != http.MethodGet && r.Method != http.MethodHead) ||
 		(r.Host != "" && r.Host != r.URL.Host) || (r.Body != nil && r.Body != http.NoBody) ||
@@ -332,6 +336,9 @@ func (s *Session) send(ctx context.Context, r *http.Request, path reservation, o
 		r.URL, r.Host = endpoint, ""
 	}
 	request := r.Clone(wire)
+	if s.source.SteamCatalog {
+		request.Header.Set("X-WebAPI-Key", s.target.SteamCatalogKey)
+	}
 	// HTTP/1's automatic replay requires either an absent body or GetBody.
 	// This EOF-only body is omitted from the wire for GET/HEAD, but prevents
 	// both stale-connection retry branches. Each retry needs a fresh permit.

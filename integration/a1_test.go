@@ -39,9 +39,10 @@ type testAttempt struct {
 }
 
 type jobDetail struct {
-	Job      testJob       `json:"job"`
-	Attempts []testAttempt `json:"attempts"`
-	Waiting  string        `json:"waiting_reason"`
+	Results  []execution.ObservationView `json:"confirmed_results"`
+	Job      testJob                     `json:"job"`
+	Attempts []testAttempt               `json:"attempts"`
+	Waiting  string                      `json:"waiting_reason"`
 }
 
 func requestFor(t *testing.T, id uuid.UUID, label, mode string, delay int32) execution.Request {

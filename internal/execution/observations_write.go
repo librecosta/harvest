@@ -45,10 +45,11 @@ func canonicalScope(scope provider.SegmentScope) (provider.SegmentScope, string,
 
 type acceptedSegment struct {
 	provider.Segment
-	key       string
-	scopeJSON []byte
-	hash      []byte
-	action    string
+	key           string
+	scopeJSON     []byte
+	hash          []byte
+	action        string
+	observationID uuid.UUID
 }
 
 func normalizeSegments(cap provider.Capability, task provider.Task, result *provider.Result) ([]acceptedSegment, error) {
@@ -197,10 +198,12 @@ func (e *Engine) writeObservations(ctx context.Context, db *q.Queries, job q.Har
 					return now, ErrConflict
 				}
 				s.action = "confirm"
+				s.observationID = prior.ObservationID
 			case sample:
 				s.action = "sample"
 			case bytes.Equal(prior.ContentHash, s.hash):
 				s.action = "confirm"
+				s.observationID = prior.ObservationID
 			default:
 				s.action = "upsert"
 			}
@@ -243,12 +246,26 @@ func (e *Engine) writeObservations(ctx context.Context, db *q.Queries, job q.Har
 		return now, ErrFence
 	}
 	position := head.LastPosition
-	for _, s := range segments {
+	for i := range segments {
+		s := &segments[i]
 		if s.action == "upsert" || s.action == "sample" || s.action == "withdraw" {
 			position++
 		}
 		if err := storeSegment(ctx, db, job, attempt, s, sample, now, position); err != nil {
 			return now, err
+		}
+	}
+	if job.Capability == provider.SteamCatalog || job.Capability == "steam.details" {
+		ids := make([]uuid.UUID, 0, len(segments))
+		for _, s := range segments {
+			if s.observationID != uuid.Nil() {
+				ids = append(ids, s.observationID)
+			}
+		}
+		if len(ids) != 0 {
+			if err := db.RecordAttemptResults(ctx, q.RecordAttemptResultsParams{ID: attempt.ID, ResultObservationIds: ids}); err != nil {
+				return now, err
+			}
 		}
 	}
 	if appendCount != 0 || eventCount != 0 {
@@ -271,7 +288,7 @@ func (s acceptedSegment) eventBytes() int32 {
 }
 
 func storeSegment(ctx context.Context, db *q.Queries, job q.HarvestJob, attempt q.HarvestAttempt,
-	s acceptedSegment, sample bool, now time.Time, position int64) error {
+	s *acceptedSegment, sample bool, now time.Time, position int64) error {
 	switch s.action {
 	case "":
 		return nil
@@ -306,5 +323,6 @@ func storeSegment(ctx context.Context, db *q.Queries, job q.HarvestJob, attempt 
 		return err
 	}
 	event.ObservationID = &id
+	s.observationID = id
 	return db.InsertChangeEvent(ctx, event)
 }

@@ -67,6 +67,7 @@ type Source struct {
 	Robots         bool   // The control plane checks current Robots policy before issuing a permit.
 	RDAP           bool
 	Steam          bool
+	SteamCatalog   bool   // Supplies a Worker-owned key only on the authorized wire request.
 	FixedPath      string // Exact fixed-source path. Redirects are disabled.
 	FixtureNetwork *FixtureNetwork
 	AllowDirect    bool
@@ -79,6 +80,10 @@ type Source struct {
 }
 
 func (s Source) Valid() bool {
+	if s.SteamCatalog && (!s.Steam || len(s.Origins) != 1 || s.Origins[0] != "https://partner.steam-api.com" ||
+		s.FixedPath != "/IStoreService/GetAppList/v1/") {
+		return false
+	}
 	if len(s.Origins) > 8 || s.MaxRequests < 1 || s.MaxRequests > 32 ||
 		s.MaxBodyBytes < 1 || s.MaxBodyBytes > 2<<20 || len(s.ContentTypes) < 1 || len(s.ContentTypes) > 8 {
 		return false

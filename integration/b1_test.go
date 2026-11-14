@@ -31,6 +31,7 @@ func configureWeb(t *testing.T, p *testPlane, a, b *fakeProxy, offers []provider
 	}
 	withRDAP := slices.Contains(capabilities, "web.rdap")
 	withSteam := slices.Contains(capabilities, "steam.details")
+	withCatalog := slices.Contains(capabilities, "steam.catalog")
 	for _, g := range []struct{ name, namespaces, profiles string }{
 		{"web_a", "web_direct, web_connect, web_hold, web_throttle", "local, connect"},
 		{"web_b", "web_socks, web_hold, web_tls, web_tls403", "socks"},
@@ -73,6 +74,8 @@ func configureWeb(t *testing.T, p *testPlane, a, b *fakeProxy, offers []provider
 				account, providerBucket = "steam_store_account", "steam_store"
 			case "steam.news", "steam.players":
 				account, providerBucket = "steam_official", "steam_api"
+			case "steam.catalog":
+				account, providerBucket = "steam_catalog_account", "steam_catalog_api"
 			}
 			fmt.Fprintf(&network, "    - {capability: %s, namespace: %s, profile: %s, provider_bucket: %s, account_bucket: %s}\n",
 				offer.Capability, ns, profile, providerBucket, account)
@@ -88,6 +91,10 @@ func configureWeb(t *testing.T, p *testPlane, a, b *fakeProxy, offers []provider
 	if withRDAP {
 		fmt.Fprintln(&network, "    - {id: rdap_account, burst: 4, per_minute: 60, concurrency: 2}")
 	}
+	if withCatalog {
+		fmt.Fprintln(&network, "    - {id: steam_catalog_api, burst: 4, per_minute: 60, concurrency: 1}")
+		fmt.Fprintln(&network, "    - {id: steam_catalog_account, burst: 4, per_minute: 60, concurrency: 1, daily_limit: 40}")
+	}
 	for _, bucket := range append([]string{"web_global", "web_provider", "web_local", "web_connect_path", "web_socks_path"}, namespaces...) {
 		fmt.Fprintf(&network, "    - {id: %s, burst: 64, per_minute: 1200, concurrency: 8}\n", bucket)
 	}
@@ -96,6 +103,9 @@ func configureWeb(t *testing.T, p *testPlane, a, b *fakeProxy, offers []provider
 	}
 	worker := func(name, profile string, end *fakeProxy, direct bool) string {
 		var data strings.Builder
+		if withCatalog {
+			fmt.Fprintf(&data, "steam_catalog_api_key: %q\n", fixtureCatalogKey)
+		}
 		fmt.Fprintf(&data, "control_url: %q\ntoken: %q\nconcurrency: 1\noffers:\n", "http://"+p.address, p.tokens[name])
 		for _, offer := range offers {
 			fmt.Fprintf(&data, "  - {capability: %s, request_schema: %d, output_schema: %d, implementation: %s}\n",

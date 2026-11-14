@@ -21,11 +21,11 @@ import (
 )
 
 type steamLab struct {
-	t                    *testing.T
-	network              *networkLab
-	store, news, players atomic.Int32
-	held, release        chan struct{}
-	requests             []steamHit // guarded by network.mu
+	t                             *testing.T
+	network                       *networkLab
+	store, news, players, catalog atomic.Int32
+	held, release                 chan struct{}
+	requests                      []steamHit // guarded by network.mu
 }
 
 type steamHit struct {
@@ -38,7 +38,7 @@ func newSteamLab(t *testing.T, p *testPlane) (*steamLab, *fakeProxy, *fakeProxy)
 	l := &steamLab{t: t, network: &networkLab{t: t, peers: make(map[string]string)}, held: make(chan struct{}, 1), release: make(chan struct{}, 1)}
 	ca, sign := testWebCA(t)
 	server := httptest.NewUnstartedServer(http.HandlerFunc(l.serve))
-	server.TLS = &tls.Config{Certificates: []tls.Certificate{sign(21, []string{"store.steampowered.com", "api.steampowered.com"}, false, false)}}
+	server.TLS = &tls.Config{Certificates: []tls.Certificate{sign(21, []string{"store.steampowered.com", "api.steampowered.com", "partner.steam-api.com"}, false, false)}}
 	server.StartTLS()
 	t.Cleanup(server.Close)
 	l.network.pinnedTargets = map[string]string{webPin + ":443": server.Listener.Addr().String()}
@@ -68,6 +68,8 @@ func (l *steamLab) serve(w http.ResponseWriter, r *http.Request) {
 	l.network.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	switch {
+	case r.Host == "partner.steam-api.com" && r.URL.Path == "/IStoreService/GetAppList/v1/":
+		l.serveCatalog(w, r)
 	case r.Host == "store.steampowered.com" && r.URL.Path == "/api/appdetails":
 		if app == "" || len(q) != 3 || q.Get("cc") == "" || q.Get("l") == "" {
 			l.t.Error("Storefront request shape")

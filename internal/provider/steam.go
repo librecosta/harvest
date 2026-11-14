@@ -58,7 +58,7 @@ func SteamManifest(fixture *egress.FixtureNetwork) Manifest {
 		{"steam.news", steamAPI, steamNewsPath, []string{"news"}, steamNewsLimit, time.Hour, normalizeSteamNewsParams, acquireSteamNews, normalizeSteamNews},
 		{"steam.players", steamAPI, steamPlayersPath, []string{"players"}, steamPlayersLimit, 30 * time.Minute, Normalize[struct{}], acquireSteamPlayers, normalizeSteamPlayers},
 	}
-	m := Manifest{Name: "steam", Resources: []Resource{{"app", steamApp}}}
+	m := Manifest{Name: "steam", Resources: []Resource{{"app", steamApp}, {"catalog", catalogKey}}, Capabilities: []Capability{catalogCapability(fixture)}}
 	for _, spec := range specs {
 		obs := &ObservationPolicy{
 			Scopes: func(t Task) []SegmentScope {
@@ -140,6 +140,9 @@ func NormalizeSteamScope(capability string, data jsontext.Value, scope Scope) (S
 // SteamRequestURI attests the SDK's compiled request shape without carrying
 // an arbitrary URL or credentials in a Permit. Both ends derive it from the Job.
 func SteamRequestURI(capability, app string, params jsontext.Value) string {
+	if capability == SteamCatalog {
+		return catalogURI(app, params)
+	}
 	if normalized, err := steamApp(app); err != nil || normalized != app {
 		return ""
 	}

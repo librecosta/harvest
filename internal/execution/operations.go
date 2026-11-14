@@ -127,6 +127,8 @@ func (e *Engine) steamSourceStatus(ctx context.Context, p config.Principal, name
 			class = "storefront"
 		case "steam.news", "steam.players":
 			class = "official_api"
+		case "steam.catalog":
+			class = "official_catalog"
 		default:
 			continue
 		}

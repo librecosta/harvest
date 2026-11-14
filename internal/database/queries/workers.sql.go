@@ -13,7 +13,7 @@ import (
 )
 
 const attempt = `-- name: Attempt :one
-SELECT id, job_id, worker_id, generation, claimed_at, heartbeat_at, lease_until, ended_at, state, error_code, result_hash, receipt_state, network_revision FROM harvest.attempts WHERE id = $1 AND job_id = $2 AND worker_id = $3 AND generation = $4
+SELECT id, job_id, worker_id, generation, claimed_at, heartbeat_at, lease_until, ended_at, state, error_code, result_hash, receipt_state, network_revision, result_observation_ids FROM harvest.attempts WHERE id = $1 AND job_id = $2 AND worker_id = $3 AND generation = $4
 `
 
 type AttemptParams struct {
@@ -45,12 +45,13 @@ func (q *Queries) Attempt(ctx context.Context, arg AttemptParams) (HarvestAttemp
 		&i.ResultHash,
 		&i.ReceiptState,
 		&i.NetworkRevision,
+		&i.ResultObservationIds,
 	)
 	return i, err
 }
 
 const attemptForGeneration = `-- name: AttemptForGeneration :one
-SELECT id, job_id, worker_id, generation, claimed_at, heartbeat_at, lease_until, ended_at, state, error_code, result_hash, receipt_state, network_revision FROM harvest.attempts WHERE job_id = $1 AND generation = $2
+SELECT id, job_id, worker_id, generation, claimed_at, heartbeat_at, lease_until, ended_at, state, error_code, result_hash, receipt_state, network_revision, result_observation_ids FROM harvest.attempts WHERE job_id = $1 AND generation = $2
 `
 
 type AttemptForGenerationParams struct {
@@ -75,6 +76,7 @@ func (q *Queries) AttemptForGeneration(ctx context.Context, arg AttemptForGenera
 		&i.ResultHash,
 		&i.ReceiptState,
 		&i.NetworkRevision,
+		&i.ResultObservationIds,
 	)
 	return i, err
 }
@@ -163,7 +165,7 @@ func (q *Queries) HeartbeatWorker(ctx context.Context, arg HeartbeatWorkerParams
 const insertAttempt = `-- name: InsertAttempt :one
 INSERT INTO harvest.attempts (id, job_id, worker_id, generation, claimed_at, heartbeat_at, lease_until, network_revision)
 VALUES ($1, $2, $3, $4, $5, $5, $6, $7)
-RETURNING id, job_id, worker_id, generation, claimed_at, heartbeat_at, lease_until, ended_at, state, error_code, result_hash, receipt_state, network_revision
+RETURNING id, job_id, worker_id, generation, claimed_at, heartbeat_at, lease_until, ended_at, state, error_code, result_hash, receipt_state, network_revision, result_observation_ids
 `
 
 type InsertAttemptParams struct {
@@ -201,6 +203,7 @@ func (q *Queries) InsertAttempt(ctx context.Context, arg InsertAttemptParams) (H
 		&i.ResultHash,
 		&i.ReceiptState,
 		&i.NetworkRevision,
+		&i.ResultObservationIds,
 	)
 	return i, err
 }
@@ -232,7 +235,7 @@ func (q *Queries) InsertWorker(ctx context.Context, arg InsertWorkerParams) erro
 }
 
 const jobAttempts = `-- name: JobAttempts :many
-SELECT id, job_id, worker_id, generation, claimed_at, heartbeat_at, lease_until, ended_at, state, error_code, result_hash, receipt_state, network_revision FROM harvest.attempts WHERE job_id = $1 ORDER BY generation
+SELECT id, job_id, worker_id, generation, claimed_at, heartbeat_at, lease_until, ended_at, state, error_code, result_hash, receipt_state, network_revision, result_observation_ids FROM harvest.attempts WHERE job_id = $1 ORDER BY generation
 `
 
 func (q *Queries) JobAttempts(ctx context.Context, jobID uuid.UUID) ([]HarvestAttempt, error) {
@@ -258,6 +261,7 @@ func (q *Queries) JobAttempts(ctx context.Context, jobID uuid.UUID) ([]HarvestAt
 			&i.ResultHash,
 			&i.ReceiptState,
 			&i.NetworkRevision,
+			&i.ResultObservationIds,
 		); err != nil {
 			return nil, err
 		}
@@ -350,7 +354,7 @@ func (q *Queries) PruneWorkers(ctx context.Context) error {
 }
 
 const renewAttempt = `-- name: RenewAttempt :one
-UPDATE harvest.attempts SET heartbeat_at = $2, lease_until = $3 WHERE id = $1 RETURNING id, job_id, worker_id, generation, claimed_at, heartbeat_at, lease_until, ended_at, state, error_code, result_hash, receipt_state, network_revision
+UPDATE harvest.attempts SET heartbeat_at = $2, lease_until = $3 WHERE id = $1 RETURNING id, job_id, worker_id, generation, claimed_at, heartbeat_at, lease_until, ended_at, state, error_code, result_hash, receipt_state, network_revision, result_observation_ids
 `
 
 type RenewAttemptParams struct {
@@ -376,6 +380,7 @@ func (q *Queries) RenewAttempt(ctx context.Context, arg RenewAttemptParams) (Har
 		&i.ResultHash,
 		&i.ReceiptState,
 		&i.NetworkRevision,
+		&i.ResultObservationIds,
 	)
 	return i, err
 }

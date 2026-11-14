@@ -72,16 +72,21 @@ func (a *API) Job(c fiber.Ctx) error {
 		return a.respond(c, 200, nil, err)
 	}
 	waiting, err := a.engine.JobWaitingReason(c.Context(), j)
+	if err != nil {
+		return a.respond(c, 200, nil, err)
+	}
+	results, err := a.engine.JobResults(c.Context(), j)
 	history := make([]attemptView, 0, len(attempts))
 	for _, a := range attempts {
 		history = append(history, attemptView{a.ID, a.WorkerID, a.Generation, a.State, a.ErrorCode, a.ClaimedAt,
 			a.HeartbeatAt, a.LeaseUntil, a.EndedAt})
 	}
 	return a.respond(c, 200, struct {
-		Job     jobView       `json:"job"`
-		History []attemptView `json:"attempts"`
-		Waiting string        `json:"waiting_reason,omitempty"`
-	}{showJob(j), history, waiting}, err)
+		Job     jobView                     `json:"job"`
+		History []attemptView               `json:"attempts"`
+		Waiting string                      `json:"waiting_reason,omitempty"`
+		Results []execution.ObservationView `json:"confirmed_results,omitempty"`
+	}{showJob(j), history, waiting, results}, err)
 }
 
 func (a *API) SubmitJob() fiber.Handler {

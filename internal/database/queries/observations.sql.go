@@ -12,6 +12,66 @@ import (
 	"uuid"
 )
 
+const attemptResultObservations = `-- name: AttemptResultObservations :many
+SELECT o.id, o.stream, o.target_id, o.capability, o.output_schema, o.scope_key, o.scope, o.state, o.observed_at, o.received_at, o.data, o.content_hash, o.source, o.evidence, o.sample, o.job_id, o.attempt_id, o.stored_bytes FROM harvest.attempts a JOIN harvest.observations o ON o.id=ANY(a.result_observation_ids)
+WHERE a.id=$1 AND a.job_id=$2 AND o.stream=$3
+ AND o.target_id=$4 AND o.capability=$5
+ORDER BY o.scope_key
+`
+
+type AttemptResultObservationsParams struct {
+	AttemptID  uuid.UUID `json:"attempt_id"`
+	JobID      uuid.UUID `json:"job_id"`
+	Stream     string    `json:"stream"`
+	TargetID   uuid.UUID `json:"target_id"`
+	Capability string    `json:"capability"`
+}
+
+func (q *Queries) AttemptResultObservations(ctx context.Context, arg AttemptResultObservationsParams) ([]HarvestObservation, error) {
+	rows, err := q.db.Query(ctx, attemptResultObservations,
+		arg.AttemptID,
+		arg.JobID,
+		arg.Stream,
+		arg.TargetID,
+		arg.Capability,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []HarvestObservation{}
+	for rows.Next() {
+		var i HarvestObservation
+		if err := rows.Scan(
+			&i.ID,
+			&i.Stream,
+			&i.TargetID,
+			&i.Capability,
+			&i.OutputSchema,
+			&i.ScopeKey,
+			&i.Scope,
+			&i.State,
+			&i.ObservedAt,
+			&i.ReceivedAt,
+			&i.Data,
+			&i.ContentHash,
+			&i.Source,
+			&i.Evidence,
+			&i.Sample,
+			&i.JobID,
+			&i.AttemptID,
+			&i.StoredBytes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const confirmCurrentResult = `-- name: ConfirmCurrentResult :exec
 UPDATE harvest.current_results SET confirmed_at = $6
 WHERE stream = $1 AND target_id = $2 AND capability = $3 AND output_schema = $4 AND scope_key = $5
@@ -463,6 +523,20 @@ func (q *Queries) PutCurrentResult(ctx context.Context, arg PutCurrentResultPara
 		arg.Position,
 		arg.ConfirmedAt,
 	)
+	return err
+}
+
+const recordAttemptResults = `-- name: RecordAttemptResults :exec
+UPDATE harvest.attempts SET result_observation_ids=$2 WHERE id=$1
+`
+
+type RecordAttemptResultsParams struct {
+	ID                   uuid.UUID   `json:"id"`
+	ResultObservationIds []uuid.UUID `json:"result_observation_ids"`
+}
+
+func (q *Queries) RecordAttemptResults(ctx context.Context, arg RecordAttemptResultsParams) error {
+	_, err := q.db.Exec(ctx, recordAttemptResults, arg.ID, arg.ResultObservationIds)
 	return err
 }
 
