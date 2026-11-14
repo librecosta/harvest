@@ -289,15 +289,19 @@ func testRegistryAndAuth(t *testing.T, p *testPlane) (uuid.UUID, uuid.UUID) {
 	var providers []provider.Description
 	p.call("GET", "/api/v1/providers", "operator", "", nil, &providers, 200)
 	executable := 0
+	catalog := false
 	for _, description := range providers {
 		for _, cap := range description.Capabilities {
 			if cap.Status == "executable" {
 				executable++
+				if description.Provider == "steam" && cap.Capability == "steam.catalog" && cap.Resource == "catalog" {
+					catalog = true
+				}
 			}
 		}
 	}
-	if executable != 11 {
-		t.Fatal("expected the fixture, seven Web and three Steam offers")
+	if executable != 12 || !catalog {
+		t.Fatalf("expected the fixture, seven Web and four Steam offers including the catalog, got %d executable offers", executable)
 	}
 	steam := p.register("steam", "app", "000570", "public")
 	if p.register("steam", "app", "570", "public") != steam {

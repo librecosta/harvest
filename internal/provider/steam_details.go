@@ -76,11 +76,15 @@ type steamContent struct {
 func readSteamContent(d storefront.AppDetailsData, raw jsontext.Value) *steamContent {
 	v := &steamContent{}
 	var age storefront.FlexibleInt
-	if len(raw) != 0 && string(raw) != "null" && string(raw) != `""` && json.Unmarshal(raw, &age) == nil {
-		n := age.Int()
-		if n >= 0 && n <= 21 {
-			v.RequiredAge = &n
+	if len(raw) != 0 && string(raw) != "null" && string(raw) != `""` {
+		if json.Unmarshal(raw, &age) != nil {
+			return nil
 		}
+		n := age.Int()
+		if n < 0 || n > 21 {
+			return nil
+		}
+		v.RequiredAge = &n
 	}
 	if ratings, err := d.DecodeRatings(); err == nil {
 		e := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(ratings["esrb"].Rating), " ", ""))
@@ -94,11 +98,15 @@ func readSteamContent(d storefront.AppDetailsData, raw jsontext.Value) *steamCon
 			v.PEGI = p
 		}
 	}
-	if d.ContentDescriptors != nil && len(d.ContentDescriptors.IDs) <= 16 {
+	if d.ContentDescriptors != nil {
+		if len(d.ContentDescriptors.IDs) > 16 {
+			return nil
+		}
 		for _, id := range d.ContentDescriptors.IDs {
-			if id > 0 && id <= 32767 {
-				v.Descriptors = append(v.Descriptors, id)
+			if id <= 0 || id > 32767 {
+				return nil
 			}
+			v.Descriptors = append(v.Descriptors, id)
 		}
 		slices.Sort(v.Descriptors)
 		v.Descriptors = slices.Compact(v.Descriptors)
