@@ -1,0 +1,11 @@
+services:
+  harvest:
+    extra_hosts: !reset []
+    networks:
+      default: {gw_priority: 1}
+      backend: {}
+
+networks:
+  backend:
+    name: librecosta-backend
+    external: true

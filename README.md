@@ -15,8 +15,7 @@ Install Go 1.27.3 and Task 3. Provision a dedicated Harvest database and login
 on PostgreSQL 18. Copy [config.example.yaml](config.example.yaml) to
 `config.yaml`, set the database endpoint and credentials, and protect the file
 with filesystem permissions. The default `verify-full` checks the database
-hostname against the system trust store. Set `tls_mode: "disable"` for a
-disposable connection when it lacks TLS.
+hostname against the system trust store. Set `tls_mode: "disable"` for direct SCRAM on the isolated CN Docker network.
 
 ```sh
 task install

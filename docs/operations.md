@@ -19,9 +19,9 @@ authorized targets.
    operator, reader and Worker tokens, and give each runtime only its own
    YAML. Use mode 0600 on Unix or an equivalent restricted Windows ACL.
    Keep server and Worker control traffic on loopback or private ingress.
-   Use trusted HTTPS for remote control traffic and verify PostgreSQL
-   TLS hostname and trust. The examples use `verify-full`. Use
-   `tls_mode: disable` only for an isolated disposable database.
+   Use trusted HTTPS for remote control traffic. PostgreSQL can use direct
+   SCRAM on the CN Docker network with `tls_mode: disable` or verify TLS
+   with `verify-full` and the system trust store.
 3. Check `task migrate ACTION=status` and explicitly apply
    `task migrate ACTION=up`. On a fresh database, run `task policy:init`
    once. Run `task start` and, in a second terminal, `task dev:worker`.
@@ -43,6 +43,11 @@ network work. Use the same probes for uptime monitoring.
 
 ### Docker Compose
 
+For CN, add `-f compose.yaml -f compose.cn.yaml` to the Compose commands.
+The Server joins `librecosta-backend` and uses `database.host: librecosta-postgres`,
+port 5432, database `harvest`, `harvest_runtime` and `tls_mode: disable`.
+The Worker keeps only its own control configuration on the project network.
+
 Build with `task check:docker` or set `HARVEST_IMAGE` to an immutable
 image reference. Set the mounted server YAML listener to
 `0.0.0.0:8080`. Compose binds the host port to loopback. It expects an
@@ -55,14 +60,16 @@ The server loopback address points back to the Worker in a separate
 container.
 
 ```sh
-docker compose run --rm harvest migrate up --config /etc/harvest/config.yaml
+docker compose run --rm -v /absolute/private/harvest-migration.yaml:/etc/harvest/migration.yaml:ro \
+  harvest migrate up --config /etc/harvest/migration.yaml
 docker compose run --rm harvest policy init --config /etc/harvest/config.yaml
 docker compose up -d --wait harvest
 docker compose --profile worker up -d --wait
 docker compose --profile worker stop
 ```
 
-Run the initialization line only on a fresh database. The optional Worker
+Use a private Migrator YAML for explicit Goose maintenance. Run policy
+initialization only on a fresh database. The optional Worker
 profile mounts `HARVEST_WORKER_CONFIG` (default `./config.worker.yaml`).
 `HARVEST_CONFIG` and `HARVEST_HTTP_PORT` select the server YAML and host
 port. Keep the mounts read-only and readable by UID 65532 without
