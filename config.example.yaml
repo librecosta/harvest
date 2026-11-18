@@ -28,35 +28,3 @@ principals:
     capabilities: [web.http, web.dns, web.tls, web.robots, web.sitemap, web.assets, web.rdap, steam.details, steam.news, steam.players]
     egress_profiles: ["local"]
     max_slots: 2
-
-# One-time policy:init input. Subsequent changes use the revisioned API.
-# Choose a region label that reflects your real egress.
-network:
-  global_bucket: "cluster"
-  routes:
-    - profile: "local"
-      mode: "direct"
-      paths:
-        - {id: "direct", kind: "direct", region: "cn", bucket: "exit"}
-  sources:
-    - {capability: "web.http", namespace: "public", profile: "local", provider_bucket: "web", account_bucket: "web_public"}
-    - {capability: "web.dns", namespace: "public", profile: "local", provider_bucket: "web", account_bucket: "web_public"}
-    - {capability: "web.tls", namespace: "public", profile: "local", provider_bucket: "web", account_bucket: "web_public"}
-    - {capability: "web.robots", namespace: "public", profile: "local", provider_bucket: "web", account_bucket: "web_public"}
-    - {capability: "web.sitemap", namespace: "public", profile: "local", provider_bucket: "web", account_bucket: "web_public"}
-    - {capability: "web.assets", namespace: "public", profile: "local", provider_bucket: "web", account_bucket: "web_public"}
-    - {capability: "web.rdap", namespace: "public", profile: "local", provider_bucket: "web", account_bucket: "rdap_account"}
-    - {capability: "steam.details", namespace: "public", profile: "local", provider_bucket: "steam_store", account_bucket: "steam_store_account"}
-    - {capability: "steam.news", namespace: "public", profile: "local", provider_bucket: "steam_api", account_bucket: "steam_official_account"}
-    - {capability: "steam.players", namespace: "public", profile: "local", provider_bucket: "steam_api", account_bucket: "steam_official_account"}
-  # The daily value is a sample operator budget. Set it from your allowance.
-  quotas:
-    - {id: "cluster", burst: 8, per_minute: 90, concurrency: 4}
-    - {id: "web", burst: 4, per_minute: 45, concurrency: 2}
-    - {id: "web_public", burst: 4, per_minute: 30, concurrency: 2}
-    - {id: "rdap_account", burst: 1, per_minute: 6, concurrency: 1}
-    - {id: "steam_store", burst: 1, per_minute: 30, concurrency: 1}
-    - {id: "steam_store_account", burst: 1, per_minute: 30, concurrency: 1}
-    - {id: "steam_api", burst: 1, per_minute: 30, concurrency: 2}
-    - {id: "steam_official_account", burst: 1, per_minute: 30, concurrency: 2, daily_limit: 100}
-    - {id: "exit", burst: 8, per_minute: 90, concurrency: 4}

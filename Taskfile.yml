@@ -96,9 +96,11 @@ tasks:
       - go run ./cmd/harvest migrate "$HARVEST_TASK_ACTION" --config "$HARVEST_TASK_CONFIG"
 
   policy:init:
-    desc: Import the legacy server network block once into PostgreSQL
+    desc: Initialize policy once from a dedicated maintenance YAML
+    vars:
+      POLICY_CONFIG: '{{default "config.policy.yaml" .POLICY_CONFIG}}'
     env:
-      HARVEST_TASK_CONFIG: '{{.CONFIG}}'
+      HARVEST_TASK_CONFIG: '{{.POLICY_CONFIG}}'
     cmds:
       - go run ./cmd/harvest policy init --config "$HARVEST_TASK_CONFIG"
 

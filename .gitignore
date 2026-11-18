@@ -41,3 +41,5 @@ go.work.sum
 .env.*
 /config.worker.yaml
 /config.worker.yml
+
+/config.policy.yaml

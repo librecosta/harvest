@@ -33,7 +33,7 @@ hostname against the system trust store. Set `tls_mode: "disable"` for direct SC
 task install
 task migrate ACTION=status
 task migrate ACTION=up
-task policy:init
+task policy:init POLICY_CONFIG=config.policy.yaml
 task start
 ```
 
@@ -76,7 +76,7 @@ Each offer identifies a compiled executable `capability`,
 `implementation`, `request_schema` and `output_schema`. The matching server
 principal has role `worker` and declares `namespaces`, `capabilities`,
 `max_slots`, and optional `egress_profiles`. Plain HTTP control URLs require
-a private IP literal. For HTTPS, configure a trusted certificate and private
+a private IP literal or Docker service name. For HTTPS, configure a trusted certificate and private
 ingress. Worker readiness is available through
 `harvest healthcheck --worker --config config.worker.yaml`. An embedded worker
 can use the same YAML shape under `local_worker` with the server's local URL.
@@ -86,10 +86,11 @@ and [regional Worker](config.worker.proxy.example.yaml) examples.
 For a compiled HTTP capability, grant the named profile to the Worker
 principal and initialize the PostgreSQL policy once. After `task migrate
 ACTION=up` and before starting the control plane, run `task policy:init`
-against server YAML containing a complete `network` block. On upgrade,
-import the effective A3 policy to preserve its accounting baseline.
-Subsequent starts use PostgreSQL. The legacy block can be removed after
-initialization.
+with a dedicated `POLICY_CONFIG=config.policy.yaml` input copied from
+[config.policy.example.yaml](config.policy.example.yaml) (or the proxy variant).
+It contains database, principals and network only; the Server rejects network.
+Existing initialized databases keep their persisted policy: do not reinitialize.
+Subsequent starts use PostgreSQL and never overwrite policy from YAML.
 
 Operators use `GET /api/v1/operations/network-policy` and `PUT` on the same
 path. Replacement takes `expected_revision` and the complete `policy`

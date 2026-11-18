@@ -35,7 +35,7 @@ func TestB2(t *testing.T) {
 	legacy := upgradeB1Discovery(t, p)
 	lab, a, b := newDiscoveryLab(t, p)
 	cfgA, cfgB := configureWeb(t, p, a, b, b2Offers())
-	p.cli("policy", "init", "--config", p.config)
+	p.cli("policy", "init", "--config", p.policyConfig())
 	control := measureControl(t, p, cfgA, cfgB)
 	server := p.serve()
 	workerA, workerB := p.start("worker", "--config", cfgA), p.start("worker", "--config", cfgB)

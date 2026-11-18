@@ -93,9 +93,7 @@ func setupA2(t *testing.T, p *testPlane, a, backup, b *fakeProxy) (string, strin
 		}
 		fmt.Fprintf(&network, "    - id: %s\n      burst: %d\n      per_minute: %d\n      concurrency: %d\n", id, burst, rate, concurrency)
 	}
-	if err := os.WriteFile(p.config, []byte(content+network.String()), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	p.writeServer([]byte(content + network.String()))
 	return networkWorkerYAML(t, p, "net_worker_a", routes, []*fakeProxy{a, backup}),
 		networkWorkerYAML(t, p, "net_worker_b", routes, []*fakeProxy{b})
 }
@@ -166,7 +164,7 @@ func TestA2(t *testing.T) {
 	backup := lab.proxy("http_backup", "http", "")
 	b := lab.proxy("socks_b", "socks5", "")
 	configA, configB := setupA2(t, p, a, backup, b)
-	p.cli("policy", "init", "--config", p.config)
+	p.cli("policy", "init", "--config", p.policyConfig())
 	control := measureControl(t, p, configA, configB)
 	server := p.serve()
 	workerA := p.start("worker", "--config", configA)

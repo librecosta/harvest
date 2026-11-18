@@ -30,7 +30,7 @@ func TestC(t *testing.T) {
 	p.cli("migrate", "up", "--config", p.config)
 	lab, a, b := newSteamLab(t, p)
 	cfgA, cfgB := configureWeb(t, p, a, b, steamOffers())
-	p.cli("policy", "init", "--config", p.config)
+	p.cli("policy", "init", "--config", p.policyConfig())
 	control := measureControl(t, p, cfgA, cfgB)
 	server := p.serve()
 	workerA, workerB := p.start("worker", "--config", cfgA), p.start("worker", "--config", cfgB)

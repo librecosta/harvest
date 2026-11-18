@@ -23,6 +23,7 @@ import (
 	"uuid"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/librecosta/harvest/internal/command"
 	"github.com/librecosta/harvest/internal/config"
@@ -140,6 +141,7 @@ type testPlane struct {
 	scratch      string
 	bin          string
 	config       string
+	networkYAML  []byte
 	address      string
 	pool         *pgxpool.Pool
 	client       *http.Client
@@ -264,6 +266,56 @@ func (p *testPlane) cli(args ...string) string {
 	p.t.Helper()
 	env := append(os.Environ(), "HARVEST_TEST_ORIGINS="+strings.Join(p.origins, ","), "HARVEST_TEST_WEB="+p.webFixture)
 	return run(p.t, p.scratch, env, p.bin, append([]string{"fixture"}, args...)...)
+}
+
+// Fixtures write separate runtime and one-time policy inputs, just like operators.
+func (p *testPlane) writeServer(raw []byte) {
+	p.t.Helper()
+	var doc yaml.Node
+	if yaml.Unmarshal(raw, &doc) != nil || len(doc.Content) != 1 {
+		p.t.Fatal("invalid generated YAML")
+	}
+	root := doc.Content[0]
+	for i := 0; i < len(root.Content); i += 2 {
+		if root.Content[i].Value != "network" {
+			continue
+		}
+		var err error
+		p.networkYAML, err = yaml.Marshal(root.Content[i+1])
+		if err != nil {
+			p.t.Fatal(err)
+		}
+		lines := strings.Split(string(raw), "\n")
+		end := len(lines)
+		if i+2 < len(root.Content) {
+			end = root.Content[i+2].Line - 1
+		}
+		raw = []byte(strings.Join(append(lines[:root.Content[i].Line-1], lines[end:]...), "\n"))
+		break
+	}
+	if os.WriteFile(p.config, raw, 0600) != nil {
+		p.t.Fatal("runtime fixture write")
+	}
+}
+
+func (p *testPlane) policyConfig() string {
+	p.t.Helper()
+	b, err := os.ReadFile(p.config)
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	var runtime map[string]any
+	var network any
+	if yaml.Unmarshal(b, &runtime) != nil || yaml.Unmarshal(p.networkYAML, &network) != nil || network == nil {
+		p.t.Fatal("policy fixture missing")
+	}
+	input := map[string]any{"database": runtime["database"], "principals": runtime["principals"], "network": network}
+	b, err = yaml.Marshal(input)
+	path := filepath.Join(p.scratch, "policy.yaml")
+	if err != nil || os.WriteFile(path, b, 0600) != nil {
+		p.t.Fatal("policy fixture write")
+	}
+	return path
 }
 
 func (p *testPlane) workerYAML(name string) string {

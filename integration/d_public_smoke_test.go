@@ -99,9 +99,7 @@ network:
     - {id: smoke_provider, burst: 1, per_minute: 30, concurrency: 1}
     - {id: smoke_account, burst: 1, per_minute: 30, concurrency: 1}
 `, proxy.Scheme, endpoint.Region, offer.Capability, ceiling)
-	if err := os.WriteFile(p.config, []byte(server), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	p.writeServer([]byte(server))
 	worker := fmt.Sprintf(`control_url: %q
 token: %q
 concurrency: 1
@@ -123,7 +121,7 @@ egress:
 	if err := os.WriteFile(path, []byte(worker), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	p.cli("policy", "init", "--config", p.config)
+	p.cli("policy", "init", "--config", p.policyConfig())
 	process := p.serve()
 	id := p.register(kind, resource, target, "public")
 	request := b1Request(id, offer.Capability, params)

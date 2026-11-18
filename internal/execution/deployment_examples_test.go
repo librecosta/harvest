@@ -22,12 +22,16 @@ func TestDeploymentExamples(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			policy, err := config.LoadPolicy(filepath.Join(root, "config.policy"+example.suffix+".example.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
 			worker, err := config.LoadWorker(filepath.Join(root, "config.worker"+example.suffix+".example.yaml"))
 			if err != nil {
 				t.Fatal(err)
 			}
 			engine := New(nil, registry, server.Principals, server.Retention)
-			if err := engine.validatePolicy(server.Network); err != nil {
+			if err := engine.validatePolicy(policy.Network); err != nil {
 				t.Fatal(err)
 			}
 			i := slices.IndexFunc(server.Principals, func(p config.Principal) bool { return p.Role == "worker" && p.Token == worker.Token })
@@ -38,12 +42,12 @@ func TestDeploymentExamples(t *testing.T) {
 			if err := engine.ValidateLocalWorker(p, worker); err != nil {
 				t.Fatal(err)
 			}
-			engine.network = server.Network
+			engine.network = policy.Network
 			if err := engine.WorkerReadiness(p); err != nil {
 				t.Fatal(err)
 			}
 			for _, offer := range worker.Offers {
-				if !slices.ContainsFunc(server.Network.Sources, func(ruleSource egress.SourceConfig) bool {
+				if !slices.ContainsFunc(policy.Network.Sources, func(ruleSource egress.SourceConfig) bool {
 					return ruleSource.Capability == offer.Capability && slices.Contains(p.EgressProfiles, ruleSource.Profile)
 				}) {
 					t.Fatalf("no matching source policy for %s", offer.Capability)

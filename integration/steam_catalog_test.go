@@ -51,7 +51,7 @@ func TestSteamCatalog(t *testing.T) {
 	p.cli("migrate", "up", "--config", p.config)
 	lab, a, b := newSteamLab(t, p)
 	cfgA, cfgB := configureWeb(t, p, a, b, []provider.Offer{{Capability: "steam.catalog", RequestSchema: 1, OutputSchema: 1, Implementation: "steam_v1"}})
-	p.cli("policy", "init", "--config", p.config)
+	p.cli("policy", "init", "--config", p.policyConfig())
 	server := p.serve()
 	aWorker := p.start("worker", "--config", cfgA)
 	bWorker := p.start("worker", "--config", cfgB)

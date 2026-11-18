@@ -48,7 +48,7 @@ func TestD(t *testing.T) {
 	if err := os.WriteFile(p.config, []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	p.cli("policy", "init", "--config", p.config)
+	p.cli("policy", "init", "--config", p.policyConfig())
 	a3Exec(t, p, "CREATE EXTENSION pg_stat_statements")
 	clientCfg := newConsumerDB(t, p)
 	metrics := measureControl(t, p, cfgA, cfgB)

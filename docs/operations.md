@@ -24,7 +24,10 @@ authorized targets.
    with `verify-full` and the system trust store.
 3. Check `task migrate ACTION=status` and explicitly apply
    `task migrate ACTION=up`. On a fresh database, run `task policy:init`
-   once. Run `task start` and, in a second terminal, `task dev:worker`.
+   with `POLICY_CONFIG=/private/config.policy.yaml` once. Copy the direct or
+   proxy config.policy example, preserve the server principal grants and use
+   a dedicated maintenance database role. Never mount that file in the Server.
+   Run `task start` and, in a second terminal, `task dev:worker`.
    A separately supervised Worker can use `harvest worker --config
    config.worker.yaml`. A local deployment can also embed one Worker by
    putting the Worker configuration under the server's `local_worker` key
@@ -55,14 +58,15 @@ existing PostgreSQL 18 instance. If the database runs on the Docker host,
 `host.docker.internal` can address it when the database bind settings,
 firewall and certificate allow that name. A containerized Worker needs
 a private control URL reachable from its own network namespace. Use an
-authenticated TLS ingress or a private IP literal for plaintext HTTP.
+authenticated TLS ingress or a private IP / Docker service name for HTTP.
 The server loopback address points back to the Worker in a separate
 container.
 
 ```sh
 docker compose run --rm -v /absolute/private/harvest-migration.yaml:/etc/harvest/migration.yaml:ro \
   harvest migrate up --config /etc/harvest/migration.yaml
-docker compose run --rm harvest policy init --config /etc/harvest/config.yaml
+docker compose run --rm -v /absolute/private/config.policy.yaml:/etc/harvest/policy.yaml:ro \
+  harvest policy init --config /etc/harvest/policy.yaml
 docker compose up -d --wait harvest
 docker compose --profile worker up -d --wait
 docker compose --profile worker stop
@@ -79,6 +83,11 @@ configured grace periods so the control plane can stop admission, finish
 in-flight receipts and close PostgreSQL.
 
 ## Policy, quotas and outages
+
+C1 upgrades: remove network from the Server YAML before replacing the binary.
+Keep the existing PostgreSQL operational policy; do not run policy init again.
+Worker proxy nodes, credentials and provider offers are unchanged. There is no
+new Migration or policy reset.
 
 After initialization, use an operator token covering all affected source
 namespaces and capabilities. GET `/api/v1/operations/network-policy`,

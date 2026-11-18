@@ -98,9 +98,7 @@ func configureWeb(t *testing.T, p *testPlane, a, b *fakeProxy, offers []provider
 	for _, bucket := range append([]string{"web_global", "web_provider", "web_local", "web_connect_path", "web_socks_path"}, namespaces...) {
 		fmt.Fprintf(&network, "    - {id: %s, burst: 64, per_minute: 1200, concurrency: 8}\n", bucket)
 	}
-	if err := os.WriteFile(p.config, []byte(server+network.String()), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	p.writeServer([]byte(server + network.String()))
 	worker := func(name, profile string, end *fakeProxy, direct bool) string {
 		var data strings.Builder
 		if withCatalog {
@@ -138,7 +136,7 @@ func TestB1(t *testing.T) {
 	p := startFixture(t)
 	lab, a, b := newWebLab(t, p, nil)
 	configA, configB := configureWeb(t, p, a, b, b1Offers)
-	p.cli("policy", "init", "--config", p.config)
+	p.cli("policy", "init", "--config", p.policyConfig())
 	control := measureControl(t, p, configA, configB)
 	server := p.serve()
 	workerA, workerB := p.start("worker", "--config", configA), p.start("worker", "--config", configB)

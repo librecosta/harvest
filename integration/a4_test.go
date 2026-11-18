@@ -79,11 +79,11 @@ func TestA4(t *testing.T) {
 	a3Problem(t, p, "PUT", a4PolicyPath, "operator", execution.PolicyUpdate{ExpectedRevision: 1, Policy: &egress.NetworkConfig{}}, 409, "policy_not_configured")
 	p.cli("stop")
 	server.waitClean(t)
-	if got := p.cli("policy", "init", "--config", p.config); got != "Initialized network policy revision 1." {
+	if got := p.cli("policy", "init", "--config", p.policyConfig()); got != "Initialized network policy revision 1." {
 		t.Fatal(got)
 	}
 	env := append(os.Environ(), "HARVEST_TEST_ORIGINS="+strings.Join(p.origins, ","))
-	expectFailure(t, p.scratch, env, p.bin, "already initialized", "fixture", "policy", "init", "--config", p.config)
+	expectFailure(t, p.scratch, env, p.bin, "already initialized", "fixture", "policy", "init", "--config", p.policyConfig())
 	server = p.serve()
 	old := a4Read(p)
 	if old.Status != "active" || old.Revision != 1 || old.RoutingRevision != 1 || old.UpdatedBy != "cli_init" || len(old.Checksum) != 64 {

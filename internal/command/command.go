@@ -132,9 +132,9 @@ func rootCommand(registry *provider.Registry, logger *slog.Logger) *cobra.Comman
 	}
 	policy := &cobra.Command{Use: "policy", Short: "Initialize the database-owned operational policy"}
 	policy.AddCommand(&cobra.Command{
-		Use: "init", Short: "Import the legacy server network block once", Args: cobra.NoArgs,
+		Use: "init", Short: "Initialize the operational policy from a dedicated YAML once", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.Load(path)
+			cfg, err := config.LoadPolicy(path)
 			if err != nil {
 				return err
 			}
@@ -148,7 +148,7 @@ func rootCommand(registry *provider.Registry, logger *slog.Logger) *cobra.Comman
 			if err := database.CheckSchema(ctx, pool); err != nil {
 				return err
 			}
-			engine := execution.New(pool, registry, cfg.Principals, cfg.Retention)
+			engine := execution.New(pool, registry, cfg.Principals, config.DefaultRetention())
 			if err := engine.InitNetworkPolicy(ctx, cfg.Network); err != nil {
 				return err
 			}
