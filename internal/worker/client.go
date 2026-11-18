@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/librecosta/harvest/internal/config"
@@ -23,8 +24,18 @@ type client struct {
 }
 
 func newClient(cfg config.Worker) client {
+	dialer := net.Dialer{Timeout: 2 * time.Second}
+	if strings.HasPrefix(cfg.ControlURL, "http://") {
+		dialer.ControlContext = func(_ context.Context, _, address string, _ syscall.RawConn) error {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil || !config.PrivateControlHost(host) {
+				return errors.New("worker HTTP control plane must resolve to a private address")
+			}
+			return nil
+		}
+	}
 	transport := &http.Transport{
-		DialContext:         (&net.Dialer{Timeout: 2 * time.Second}).DialContext,
+		DialContext:         dialer.DialContext,
 		TLSHandshakeTimeout: 2 * time.Second,
 		MaxIdleConnsPerHost: int(cfg.Concurrency)*2 + 1,
 		MaxConnsPerHost:     int(cfg.Concurrency)*2 + 1,

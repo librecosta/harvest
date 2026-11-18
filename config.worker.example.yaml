@@ -1,5 +1,5 @@
 # Copy to config.worker.yaml and match the token and region to the server.
-control_url: "http://127.0.0.1:8080"
+control_url: "http://127.0.0.1:8080" # Docker private network: http://harvest:8080
 token: "REPLACE_WITH_A_RANDOM_WORKER_SERVICE_TOKEN"
 concurrency: 2
 

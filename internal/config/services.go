@@ -4,7 +4,9 @@ import (
 	"errors"
 	"net/netip"
 	"net/url"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/librecosta/harvest/internal/egress"
@@ -45,8 +47,14 @@ func validateWorker(w Worker) error {
 		u.ForceQuery || strings.Contains(w.ControlURL, "#") || (u.Path != "" && u.Path != "/") {
 		return errors.New("control_url must be an origin without credentials, query or fragment")
 	}
-	if u.Scheme != "https" && (u.Scheme != "http" || !privateHost(u.Hostname())) {
-		return errors.New("worker control_url requires HTTPS or a private IP for HTTP")
+	if u.Port() != "" {
+		port, err := strconv.Atoi(u.Port())
+		if err != nil || port < 1 || port > 65535 {
+			return errors.New("invalid worker control_url port")
+		}
+	}
+	if u.Scheme != "https" && (u.Scheme != "http" || !(PrivateControlHost(u.Hostname()) || serviceName.MatchString(u.Hostname()))) {
+		return errors.New("worker control_url requires HTTPS or HTTP to a private IP or Docker service name")
 	}
 	if !validToken(w.Token) || w.Concurrency < 1 || w.Concurrency > 16 ||
 		len(w.Offers) < 1 || len(w.Offers) > 32 || !identifiers(w.EgressProfiles) {
@@ -73,7 +81,10 @@ func validSteamCatalogKey(key string) bool {
 	}) < 0
 }
 
-func privateHost(host string) bool {
+var serviceName = regexp.MustCompile("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
+
+// PrivateControlHost checks literal addresses before sending worker credentials.
+func PrivateControlHost(host string) bool {
 	ip, err := netip.ParseAddr(host)
 	if err != nil || ip.Zone() != "" {
 		return false

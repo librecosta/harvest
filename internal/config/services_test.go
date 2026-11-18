@@ -39,6 +39,9 @@ func TestWorkerYAMLIsIndependentAndStrict(t *testing.T) {
 		valid      bool
 	}{
 		{"worker", workerYAML, true},
+		{"Docker DNS", strings.Replace(workerYAML, "127.0.0.1", "harvest", 1), true},
+		{"explicit HTTPS", strings.Replace(workerYAML, "http://127.0.0.1", "https://harvest.example.invalid", 1), true},
+		{"public DNS HTTP", strings.Replace(workerYAML, "127.0.0.1", "harvest.example.invalid", 1), false},
 		{"server fields", workerYAML + "database: {password: secret}\n", false},
 		{"unknown offer field", workerYAML + "    url: https://example.com\n", false},
 		{"plain public URL", strings.Replace(workerYAML, "127.0.0.1", "8.8.8.8", 1), false},
