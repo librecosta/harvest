@@ -44,7 +44,7 @@ func LoadWorker(path string) (Worker, error) {
 func validateWorker(w Worker) error {
 	u, err := url.Parse(w.ControlURL)
 	if err != nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" ||
-		u.ForceQuery || strings.Contains(w.ControlURL, "#") || (u.Path != "" && u.Path != "/") {
+		u.ForceQuery || strings.HasSuffix(u.Host, ":") || strings.Contains(w.ControlURL, "#") || (u.Path != "" && u.Path != "/") {
 		return errors.New("control_url must be an origin without credentials, query or fragment")
 	}
 	if u.Port() != "" {
