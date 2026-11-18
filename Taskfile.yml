@@ -1,7 +1,7 @@
 version: '3'
 
 env:
-  GOTOOLCHAIN: go1.27.3
+  GOTOOLCHAIN: local
 
 vars:
   CONFIG: '{{.ROOT_DIR}}/config.yaml'
@@ -20,6 +20,17 @@ tasks:
     desc: Build the native CLI into bin/
     cmds:
       - go build -trimpath -o "{{.BIN}}" ./cmd/harvest
+
+  build:linux:
+    desc: Build a static Linux binary on the host for Docker packaging
+    vars:
+      ARCH: '{{default "amd64" .ARCH}}'
+    env:
+      CGO_ENABLED: '0'
+      GOOS: linux
+      GOARCH: '{{.ARCH}}'
+    cmds:
+      - go build -trimpath -ldflags="-s -w" -o bin/linux/{{.ARCH}}/harvest ./cmd/harvest
 
   dev:
     desc: Build and run the local server in the foreground
@@ -94,6 +105,7 @@ tasks:
   check:docker:
     desc: Validate deployment Compose and build the local Linux image
     cmds:
+      - task: build:linux
       - docker compose config --quiet
       - docker build -t harvest:local .
 

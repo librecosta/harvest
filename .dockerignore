@@ -1,13 +1,7 @@
 **
-!go.mod
-!go.sum
+!bin/
+!bin/linux/
+!bin/linux/**
 !LICENSE
 !LICENSE.steam-go
 !LICENSE.x-time
-!cmd/
-!cmd/**
-!db/
-!db/**
-!internal/
-!internal/**
-**/*_test.go

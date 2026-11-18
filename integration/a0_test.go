@@ -57,6 +57,7 @@ func TestA0(t *testing.T) {
 			}
 		}
 	})
+	run(t, root, nil, "task", "build:linux")
 	docker("build", "-t", project, ".")
 	compose("up", "-d", "--wait", "--wait-timeout", "45", "postgres")
 	dbQuery := func(sql string) string {

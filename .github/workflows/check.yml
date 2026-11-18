@@ -32,4 +32,5 @@ jobs:
           go-version-file: go.mod
       - run: go install github.com/go-task/task/v3/cmd/task@v3.53.1
       - run: task check:containers
+      - run: task build:linux ARCH=arm64
       - run: docker buildx build --platform linux/arm64 .

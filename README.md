@@ -9,6 +9,18 @@ discovery data. The Steam Provider collects Storefront details, News and
 Current Players. Integration tests use disposable PostgreSQL and local
 network fixtures.
 
+## Container packaging
+
+Install Go 1.27.3 on the host PATH. Task sets `GOTOOLCHAIN=local` so a missing
+toolchain fails without an automatic download. Run `task build:linux`, then
+`docker build -t harvest:local .`. The static artifact is
+`bin/linux/amd64/harvest`. For ARM64, build with `ARCH=arm64` and package
+with `docker build --platform linux/arm64`. The single-stage image only copies
+the binary and licenses into the shared non-root runtime with system CA.
+Existing CLI arguments, probes and explicit maintenance commands remain available.
+Mount runtime YAML and optional trust files read-only outside the image.
+`task check:docker` performs host compilation before packaging.
+
 ## Local development
 
 Install Go 1.27.3 and Task 3. Provision a dedicated Harvest database and login
