@@ -10,6 +10,7 @@ The design contracts remain in `docs/` and the runtime database rules are in
 - Use one explicit YAML configuration. Keep credentials out of logs, CLI arguments, fixtures derived from real environments and commits.
 - Keep Fiber route registration and handlers separate. Give the runtime one shutdown owner and test failed startup and clean shutdown.
 - Apply reviewed migrations only with the explicit CLI. Use native Go `uuid.NewV7()` for application entity IDs when introducing entities.
+- For migration or GoFurry Management, Admin or Harvest integration changes, record isolated test results, actual development database migration status, and native Windows Server/Worker verification separately. Reuse the existing Task commands and private YAML. Verify the target and a restorable backup before applying a development migration. Startup never applies migrations.
 - Preserve Job-first fencing and the separate worker authentication scope. Register synthetic executors only in the integration test binary.
 - Route Provider HTTP through the scoped Worker client. Authorize routes and debit shared permits centrally. Keep proxy credentials in Worker YAML.
 - Run `task check` before committing. Run `task check:containers` when changing config, database connectivity, lifecycle or Docker. Use the disposable fixture for destructive verification.
