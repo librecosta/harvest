@@ -3,11 +3,12 @@ package database
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const schemaVersion = 7
+const schemaVersion = 8
 
 func CheckSchema(ctx context.Context, pool *pgxpool.Pool) error {
 	// Goose owns this table, so it is intentionally absent from sqlc's DDL.
@@ -34,7 +35,10 @@ func CheckSchema(ctx context.Context, pool *pgxpool.Pool) error {
 			AND attname = 'rdap_stage' AND NOT attisdropped)
 		FROM public.goose_db_version ORDER BY id DESC LIMIT 1`).
 		Scan(&version, &applied, &present)
-	if err != nil || version != schemaVersion || !applied || !present {
+	if err == nil && applied && version != schemaVersion {
+		return fmt.Errorf("Harvest schema is unavailable or incompatible; check explicit Goose migration status (found %d, expected %d)", version, schemaVersion)
+	}
+	if err != nil || !applied || !present {
 		return errors.New("Harvest schema is unavailable or incompatible; check explicit Goose migration status")
 	}
 	return nil
