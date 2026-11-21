@@ -112,19 +112,21 @@ tasks:
       - docker build -t harvest:local .
 
   check:containers:
-    desc: Verify lifecycle, execution, egress, recovery and live policy on disposable PostgreSQL 18
+    desc: Docker-only. Verify lifecycle, execution, egress, recovery and live policy on disposable PostgreSQL 18
     cmds:
       - go test -tags=integration -count=1 -timeout=12m -v ./integration
 
-  check:soak:
-    desc: Run a 15-minute mixed workload against disposable local fixtures
+  check:docker:soak:
+    aliases: [check:soak]
+    desc: Docker-only. Run a 15-minute mixed workload against disposable local fixtures
     env:
       HARVEST_D_SOAK: '1'
     cmds:
       - go test -tags=integration -run '^TestD$' -count=1 -timeout=19m -v ./integration
 
-  check:public-smoke:
-    desc: Run one explicitly authorized Web or Storefront Job through a supplied proxy and disposable DB
+  check:docker:public-smoke:
+    aliases: [check:public-smoke]
+    desc: Docker-only. Run one explicitly authorized Web or Storefront Job through a supplied proxy and disposable DB
     env:
       HARVEST_PUBLIC_SMOKE_CONFIRM: '{{.CONFIRM}}'
       HARVEST_PUBLIC_SMOKE_SOURCE: '{{.SOURCE}}'

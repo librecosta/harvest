@@ -44,8 +44,10 @@ by its process supervisor unless started with `--local`.
 ```sh
 harvest healthcheck --config config.yaml
 task check
-task check:containers
 ```
+
+`task check:containers` runs the isolated Docker integration suite and requires
+explicit authorization. Use the configured native services for local integration.
 
 Each runtime reads a single explicit YAML file. Server tasks use
 `config.yaml` by default and accept `CONFIG=path/to/file.yaml`. Unknown or
