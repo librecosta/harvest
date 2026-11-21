@@ -66,6 +66,35 @@ func (q *Queries) AttachSubmission(ctx context.Context, arg AttachSubmissionPara
 	return err
 }
 
+const collectionActivity = `-- name: CollectionActivity :one
+SELECT count(*) FILTER (WHERE j.state IN ('running','cancel_requested')) AS running,
+ count(*) FILTER (WHERE j.state IN ('queued','retry_wait')) AS waiting,
+ count(*) FILTER (WHERE j.state IN ('failed','partial')) AS recent_failures
+FROM harvest.jobs j
+WHERE j.namespace=$1 AND j.schedule_id IS NOT NULL
+ AND (j.state IN ('queued','running','retry_wait','cancel_requested') OR
+      j.state IN ('failed','partial') AND j.updated_at>=statement_timestamp()-interval '24 hours')
+ AND (coalesce(cardinality($2::text[]),0)=0 OR j.capability=ANY($2::text[]))
+`
+
+type CollectionActivityParams struct {
+	Namespace    string   `json:"namespace"`
+	Capabilities []string `json:"capabilities"`
+}
+
+type CollectionActivityRow struct {
+	Running        int64 `json:"running"`
+	Waiting        int64 `json:"waiting"`
+	RecentFailures int64 `json:"recent_failures"`
+}
+
+func (q *Queries) CollectionActivity(ctx context.Context, arg CollectionActivityParams) (CollectionActivityRow, error) {
+	row := q.db.QueryRow(ctx, collectionActivity, arg.Namespace, arg.Capabilities)
+	var i CollectionActivityRow
+	err := row.Scan(&i.Running, &i.Waiting, &i.RecentFailures)
+	return i, err
+}
+
 const expireQueuedJobs = `-- name: ExpireQueuedJobs :execrows
 WITH due AS (
     SELECT id FROM harvest.jobs WHERE state IN ('queued', 'retry_wait') AND deadline_at <= statement_timestamp()
@@ -368,6 +397,89 @@ func (q *Queries) LastFailedScheduleJob(ctx context.Context, arg LastFailedSched
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listCollectionJobs = `-- name: ListCollectionJobs :many
+SELECT id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, cause, schedule_id, schedule_revision, scheduled_for, origin_job_id, priority, available_at, deadline_at, state, attempt_count, max_attempts, generation, last_code, accepted_attempt_id, accepted_hash, created_at, updated_at FROM harvest.jobs j
+WHERE j.namespace=$1 AND j.schedule_id IS NOT NULL
+ AND (coalesce(cardinality($2::text[]),0)=0 OR j.capability=ANY($2::text[]))
+ AND ($3::text='' OR j.capability=$3)
+ AND ($4::uuid IS NULL OR j.id<$4)
+ AND ($5::timestamptz IS NULL OR j.created_at>=$5)
+ AND ($6::timestamptz IS NULL OR j.created_at<$6)
+ AND ($7::text='' OR j.state=$7)
+ AND ($8::text='' OR $8='queue' AND j.state IN ('queued','running','retry_wait','cancel_requested')
+      OR $8='history' AND j.state IN ('succeeded','partial','failed','cancelled'))
+ORDER BY j.id DESC LIMIT $9
+`
+
+type ListCollectionJobsParams struct {
+	Namespace    string     `json:"namespace"`
+	Capabilities []string   `json:"capabilities"`
+	Capability   string     `json:"capability"`
+	BeforeID     *uuid.UUID `json:"before_id"`
+	Since        *time.Time `json:"since"`
+	Until        *time.Time `json:"until"`
+	State        string     `json:"state"`
+	JobGroup     string     `json:"job_group"`
+	PageSize     int32      `json:"page_size"`
+}
+
+func (q *Queries) ListCollectionJobs(ctx context.Context, arg ListCollectionJobsParams) ([]HarvestJob, error) {
+	rows, err := q.db.Query(ctx, listCollectionJobs,
+		arg.Namespace,
+		arg.Capabilities,
+		arg.Capability,
+		arg.BeforeID,
+		arg.Since,
+		arg.Until,
+		arg.State,
+		arg.JobGroup,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []HarvestJob{}
+	for rows.Next() {
+		var i HarvestJob
+		if err := rows.Scan(
+			&i.ID,
+			&i.TargetID,
+			&i.Namespace,
+			&i.Capability,
+			&i.RequestSchema,
+			&i.ExecutionKey,
+			&i.Params,
+			&i.Scope,
+			&i.Fingerprint,
+			&i.Cause,
+			&i.ScheduleID,
+			&i.ScheduleRevision,
+			&i.ScheduledFor,
+			&i.OriginJobID,
+			&i.Priority,
+			&i.AvailableAt,
+			&i.DeadlineAt,
+			&i.State,
+			&i.AttemptCount,
+			&i.MaxAttempts,
+			&i.Generation,
+			&i.LastCode,
+			&i.AcceptedAttemptID,
+			&i.AcceptedHash,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listJobs = `-- name: ListJobs :many

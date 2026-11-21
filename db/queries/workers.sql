@@ -64,3 +64,8 @@ SELECT EXISTS (
       AND last_seen > statement_timestamp() - interval '30 seconds'
       AND sqlc.arg(execution_key)::text = ANY(offers)
 );
+
+-- name: CountCollectionWorkers :one
+SELECT count(*) FROM harvest.workers
+WHERE principal=ANY(sqlc.arg(principals)::text[]) AND NOT draining
+ AND last_seen>=statement_timestamp()-interval '30 seconds';

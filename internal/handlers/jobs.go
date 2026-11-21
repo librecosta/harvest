@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"slices"
 	"strconv"
 	"time"
 	"uuid"
@@ -21,6 +22,7 @@ type jobView struct {
 	AvailableAt      time.Time         `json:"available_at"`
 	DeadlineAt       time.Time         `json:"deadline_at"`
 	UpdatedAt        time.Time         `json:"updated_at"`
+	CreatedAt        time.Time         `json:"created_at"`
 	AttemptCount     int32             `json:"attempt_count"`
 	MaxAttempts      int32             `json:"max_attempts"`
 	Generation       int64             `json:"generation"`
@@ -47,7 +49,7 @@ type attemptView struct {
 func showJob(j q.HarvestJob) jobView {
 	return jobView{
 		ID: j.ID, Namespace: j.Namespace, Request: requestView(j.TargetID, j.Capability, j.RequestSchema, j.Params, j.Scope),
-		State: j.State, Cause: j.Cause, AvailableAt: j.AvailableAt, DeadlineAt: j.DeadlineAt, UpdatedAt: j.UpdatedAt,
+		State: j.State, Cause: j.Cause, AvailableAt: j.AvailableAt, DeadlineAt: j.DeadlineAt, UpdatedAt: j.UpdatedAt, CreatedAt: j.CreatedAt,
 		AttemptCount: j.AttemptCount, MaxAttempts: j.MaxAttempts, Generation: j.Generation, Code: j.LastCode,
 		ScheduleID: j.ScheduleID, ScheduleRevision: j.ScheduleRevision, ScheduledFor: j.ScheduledFor,
 		OriginJobID: j.OriginJobID, AcceptedAttempt: j.AcceptedAttemptID,
@@ -61,6 +63,70 @@ func (a *API) Jobs(c fiber.Ctx) error {
 	}
 	rows, err := a.engine.Jobs(c.Context(), request(c).principal, p)
 	return a.respond(c, 200, list(rows, p.Size, func(j q.HarvestJob) (jobView, uuid.UUID) { return showJob(j), j.ID }), err)
+}
+
+func (a *API) CollectionStatus(c fiber.Ctx) error {
+	args := c.Request().URI().QueryArgs()
+	if args.Len() != 1 || len(c.Query("namespace")) > 63 || c.Query("namespace") == "" {
+		return a.respond(c, 200, nil, execution.ErrInvalid)
+	}
+	out, err := a.engine.CollectionStatus(c.Context(), request(c).principal, c.Query("namespace"))
+	return a.respond(c, 200, out, err)
+}
+
+func (a *API) CollectionJobs(c fiber.Ctx) error {
+	filter := q.ListCollectionJobsParams{PageSize: 21}
+	seen, bad := make(map[string]bool), false
+	c.Request().URI().QueryArgs().VisitAll(func(k, v []byte) {
+		key, value := string(k), string(v)
+		bad = bad || seen[key] || len(value) > 80
+		seen[key] = true
+		switch key {
+		case "namespace":
+			filter.Namespace = value
+		case "capability":
+			filter.Capability = value
+		case "group":
+			filter.JobGroup = value
+			bad = bad || !slices.Contains([]string{"queue", "history"}, value)
+		case "state":
+			filter.State = value
+			bad = bad || !slices.Contains([]string{"queued", "running", "retry_wait", "cancel_requested", "succeeded", "partial", "failed", "cancelled"}, value)
+		case "before":
+			parsed, err := queryID(value)
+			bad = bad || err != nil
+			filter.BeforeID = &parsed
+		case "since", "until":
+			parsed, err := time.Parse(time.RFC3339Nano, value)
+			bad = bad || err != nil
+			if key == "since" {
+				filter.Since = &parsed
+			} else {
+				filter.Until = &parsed
+			}
+		default:
+			bad = true
+		}
+	})
+	if bad || filter.Namespace == "" || filter.Since != nil && filter.Until != nil && !filter.Since.Before(*filter.Until) {
+		return a.respond(c, 200, nil, execution.ErrInvalid)
+	}
+	rows, err := a.engine.CollectionJobs(c.Context(), request(c).principal, filter)
+	if err != nil {
+		return a.respond(c, 200, nil, err)
+	}
+	out := struct {
+		Items  []jobView  `json:"items"`
+		Before *uuid.UUID `json:"before,omitempty"`
+	}{Items: []jobView{}}
+	if len(rows) == int(filter.PageSize) {
+		rows = rows[:len(rows)-1]
+		out.Before = &rows[len(rows)-1].ID
+	}
+	for _, row := range rows {
+		out.Items = append(out.Items, showJob(row))
+	}
+	return a.respond(c, 200, out, nil)
 }
 
 func (a *API) ScheduleJobs(c fiber.Ctx) error {
@@ -101,25 +167,21 @@ func (a *API) ScheduleJobs(c fiber.Ctx) error {
 	if err != nil {
 		return a.respond(c, 200, nil, err)
 	}
-	type scheduledJob struct {
-		jobView
-		CreatedAt time.Time `json:"created_at"`
-	}
 	out := struct {
-		Schedule    scheduleView   `json:"schedule"`
-		Items       []scheduledJob `json:"items"`
-		Before      *uuid.UUID     `json:"before,omitempty"`
-		LastFailure *scheduledJob  `json:"last_failure,omitempty"`
-	}{Schedule: showSchedule(schedule), Items: []scheduledJob{}}
+		Schedule    scheduleView `json:"schedule"`
+		Items       []jobView    `json:"items"`
+		Before      *uuid.UUID   `json:"before,omitempty"`
+		LastFailure *jobView     `json:"last_failure,omitempty"`
+	}{Schedule: showSchedule(schedule), Items: []jobView{}}
 	if len(rows) > int(limit) {
 		rows = rows[:limit]
 		out.Before = &rows[len(rows)-1].ID
 	}
 	for _, row := range rows {
-		out.Items = append(out.Items, scheduledJob{showJob(row), row.CreatedAt})
+		out.Items = append(out.Items, showJob(row))
 	}
 	if lastFailure != nil {
-		job := scheduledJob{showJob(*lastFailure), lastFailure.CreatedAt}
+		job := showJob(*lastFailure)
 		out.LastFailure = &job
 	}
 	return a.respond(c, 200, out, nil)

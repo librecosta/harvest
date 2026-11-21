@@ -33,6 +33,19 @@ WHERE namespace = $1 AND id > sqlc.arg(after_id)::uuid
   AND (coalesce(cardinality(sqlc.arg(capabilities)::text[]), 0) = 0 OR capability = ANY(sqlc.arg(capabilities)::text[]))
 ORDER BY id LIMIT sqlc.arg(page_size);
 
+-- name: ListCollectionJobs :many
+SELECT * FROM harvest.jobs j
+WHERE j.namespace=sqlc.arg(namespace) AND j.schedule_id IS NOT NULL
+ AND (coalesce(cardinality(sqlc.arg(capabilities)::text[]),0)=0 OR j.capability=ANY(sqlc.arg(capabilities)::text[]))
+ AND (sqlc.arg(capability)::text='' OR j.capability=sqlc.arg(capability))
+ AND (sqlc.narg(before_id)::uuid IS NULL OR j.id<sqlc.narg(before_id))
+ AND (sqlc.narg(since)::timestamptz IS NULL OR j.created_at>=sqlc.narg(since))
+ AND (sqlc.narg(until)::timestamptz IS NULL OR j.created_at<sqlc.narg(until))
+ AND (sqlc.arg(state)::text='' OR j.state=sqlc.arg(state))
+ AND (sqlc.arg(job_group)::text='' OR sqlc.arg(job_group)='queue' AND j.state IN ('queued','running','retry_wait','cancel_requested')
+      OR sqlc.arg(job_group)='history' AND j.state IN ('succeeded','partial','failed','cancelled'))
+ORDER BY j.id DESC LIMIT sqlc.arg(page_size);
+
 -- name: ListScheduleJobs :many
 SELECT j.* FROM harvest.jobs j JOIN harvest.schedules s ON s.id=j.schedule_id
 WHERE s.id=sqlc.arg(schedule_id)::uuid AND j.namespace=s.namespace AND j.target_id=s.target_id
@@ -114,3 +127,13 @@ SELECT
      WHERE j.namespace = sqlc.arg(scope_namespace)::text AND a.state = 'expired'
         AND (coalesce(cardinality(sqlc.arg(capabilities)::text[]), 0) = 0
         OR j.capability = ANY(sqlc.arg(capabilities)::text[]))) AS expired_attempts;
+
+-- name: CollectionActivity :one
+SELECT count(*) FILTER (WHERE j.state IN ('running','cancel_requested')) AS running,
+ count(*) FILTER (WHERE j.state IN ('queued','retry_wait')) AS waiting,
+ count(*) FILTER (WHERE j.state IN ('failed','partial')) AS recent_failures
+FROM harvest.jobs j
+WHERE j.namespace=sqlc.arg(namespace) AND j.schedule_id IS NOT NULL
+ AND (j.state IN ('queued','running','retry_wait','cancel_requested') OR
+      j.state IN ('failed','partial') AND j.updated_at>=statement_timestamp()-interval '24 hours')
+ AND (coalesce(cardinality(sqlc.arg(capabilities)::text[]),0)=0 OR j.capability=ANY(sqlc.arg(capabilities)::text[]));

@@ -81,6 +81,19 @@ func (q *Queries) AttemptForGeneration(ctx context.Context, arg AttemptForGenera
 	return i, err
 }
 
+const countCollectionWorkers = `-- name: CountCollectionWorkers :one
+SELECT count(*) FROM harvest.workers
+WHERE principal=ANY($1::text[]) AND NOT draining
+ AND last_seen>=statement_timestamp()-interval '30 seconds'
+`
+
+func (q *Queries) CountCollectionWorkers(ctx context.Context, principals []string) (int64, error) {
+	row := q.db.QueryRow(ctx, countCollectionWorkers, principals)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const eligibleWorker = `-- name: EligibleWorker :one
 SELECT EXISTS (
     SELECT 1 FROM harvest.workers

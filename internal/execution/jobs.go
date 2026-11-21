@@ -151,6 +151,7 @@ func (e *Engine) RetryJob(ctx context.Context, p config.Principal, key string, i
 		}
 		args := w.jobArgs(now, "retry_requested")
 		args.OriginJobID, args.Priority = &id, 1
+		args.ScheduleID, args.ScheduleRevision = old.ScheduleID, old.ScheduleRevision
 		job, err := db.InsertJob(ctx, args)
 		if err != nil {
 			return job, err
@@ -194,6 +195,14 @@ func (e *Engine) Jobs(ctx context.Context, p config.Principal, page Page) ([]q.H
 	return e.queries.ListJobs(ctx, q.ListJobsParams{
 		Namespace: page.Namespace, AfterID: page.After, PageSize: page.Size, Capabilities: p.Capabilities,
 	})
+}
+
+func (e *Engine) CollectionJobs(ctx context.Context, p config.Principal, filter q.ListCollectionJobsParams) ([]q.HarvestJob, error) {
+	if !canNamespace(p, filter.Namespace) {
+		return nil, ErrForbidden
+	}
+	filter.Capabilities = p.Capabilities
+	return e.queries.ListCollectionJobs(ctx, filter)
 }
 
 // ScheduleJobs authorizes the schedule first. The queries also tie every job

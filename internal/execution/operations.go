@@ -61,6 +61,29 @@ func (e *Engine) workerPrincipals(namespace string, caps []string) []string {
 	return names
 }
 
+type CollectionStatus struct {
+	q.CollectionActivityRow
+	ReadyWorkers  int64 `json:"ready_workers"`
+	Draining      bool  `json:"draining"`
+	CanManageJobs bool  `json:"can_manage_jobs"`
+}
+
+func (e *Engine) CollectionStatus(ctx context.Context, p config.Principal, namespace string) (CollectionStatus, error) {
+	if !canNamespace(p, namespace) {
+		return CollectionStatus{}, ErrForbidden
+	}
+	activity, err := e.queries.CollectionActivity(ctx, q.CollectionActivityParams{Namespace: namespace, Capabilities: p.Capabilities})
+	if err != nil {
+		return CollectionStatus{}, err
+	}
+	workers, err := e.queries.CountCollectionWorkers(ctx, e.workerPrincipals(namespace, p.Capabilities))
+	if err != nil {
+		return CollectionStatus{}, err
+	}
+	draining := e.draining.Load()
+	return CollectionStatus{activity, workers, draining, p.Role == "operator" && !draining}, nil
+}
+
 func (e *Engine) Operations(ctx context.Context, p config.Principal, namespace string) (Operations, error) {
 	if !canNamespace(p, namespace) {
 		return Operations{}, ErrForbidden
