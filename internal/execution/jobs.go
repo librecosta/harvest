@@ -196,6 +196,24 @@ func (e *Engine) Jobs(ctx context.Context, p config.Principal, page Page) ([]q.H
 	})
 }
 
+// ScheduleJobs authorizes the schedule first. The queries also tie every job
+// to its exact request, including the provider scope and parameter payload.
+func (e *Engine) ScheduleJobs(ctx context.Context, p config.Principal, id uuid.UUID, before *uuid.UUID, since time.Time, limit int32) (q.HarvestSchedule, []q.HarvestJob, *q.HarvestJob, error) {
+	schedule, err := e.Schedule(ctx, p, id)
+	if err != nil {
+		return schedule, nil, nil, err
+	}
+	jobs, err := e.queries.ListScheduleJobs(ctx, q.ListScheduleJobsParams{ScheduleID: id, BeforeID: before, Since: since, PageSize: limit + 1})
+	if err != nil {
+		return schedule, nil, nil, err
+	}
+	job, err := e.queries.LastFailedScheduleJob(ctx, q.LastFailedScheduleJobParams{ScheduleID: id, Since: since})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return schedule, jobs, nil, nil
+	}
+	return schedule, jobs, &job, err
+}
+
 func (e *Engine) Job(ctx context.Context, p config.Principal, id uuid.UUID) (q.HarvestJob, []q.HarvestAttempt, error) {
 	type snapshot struct {
 		job      q.HarvestJob

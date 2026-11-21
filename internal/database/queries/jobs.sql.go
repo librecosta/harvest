@@ -322,6 +322,54 @@ func (q *Queries) JobSummary(ctx context.Context, arg JobSummaryParams) ([]JobSu
 	return items, nil
 }
 
+const lastFailedScheduleJob = `-- name: LastFailedScheduleJob :one
+SELECT j.id, j.target_id, j.namespace, j.capability, j.request_schema, j.execution_key, j.params, j.scope, j.fingerprint, j.cause, j.schedule_id, j.schedule_revision, j.scheduled_for, j.origin_job_id, j.priority, j.available_at, j.deadline_at, j.state, j.attempt_count, j.max_attempts, j.generation, j.last_code, j.accepted_attempt_id, j.accepted_hash, j.created_at, j.updated_at FROM harvest.jobs j JOIN harvest.schedules s ON s.id=j.schedule_id
+WHERE s.id=$1::uuid AND j.namespace=s.namespace AND j.target_id=s.target_id
+ AND j.capability=s.capability AND j.request_schema=s.request_schema AND j.params=s.params AND j.scope=s.scope
+ AND j.created_at>=$2::timestamptz
+ AND j.state IN ('failed','partial')
+ORDER BY j.id DESC LIMIT 1
+`
+
+type LastFailedScheduleJobParams struct {
+	ScheduleID uuid.UUID `json:"schedule_id"`
+	Since      time.Time `json:"since"`
+}
+
+func (q *Queries) LastFailedScheduleJob(ctx context.Context, arg LastFailedScheduleJobParams) (HarvestJob, error) {
+	row := q.db.QueryRow(ctx, lastFailedScheduleJob, arg.ScheduleID, arg.Since)
+	var i HarvestJob
+	err := row.Scan(
+		&i.ID,
+		&i.TargetID,
+		&i.Namespace,
+		&i.Capability,
+		&i.RequestSchema,
+		&i.ExecutionKey,
+		&i.Params,
+		&i.Scope,
+		&i.Fingerprint,
+		&i.Cause,
+		&i.ScheduleID,
+		&i.ScheduleRevision,
+		&i.ScheduledFor,
+		&i.OriginJobID,
+		&i.Priority,
+		&i.AvailableAt,
+		&i.DeadlineAt,
+		&i.State,
+		&i.AttemptCount,
+		&i.MaxAttempts,
+		&i.Generation,
+		&i.LastCode,
+		&i.AcceptedAttemptID,
+		&i.AcceptedHash,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listJobs = `-- name: ListJobs :many
 SELECT id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, cause, schedule_id, schedule_revision, scheduled_for, origin_job_id, priority, available_at, deadline_at, state, attempt_count, max_attempts, generation, last_code, accepted_attempt_id, accepted_hash, created_at, updated_at FROM harvest.jobs
 WHERE namespace = $1 AND id > $2::uuid
@@ -341,6 +389,74 @@ func (q *Queries) ListJobs(ctx context.Context, arg ListJobsParams) ([]HarvestJo
 		arg.Namespace,
 		arg.AfterID,
 		arg.Capabilities,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []HarvestJob{}
+	for rows.Next() {
+		var i HarvestJob
+		if err := rows.Scan(
+			&i.ID,
+			&i.TargetID,
+			&i.Namespace,
+			&i.Capability,
+			&i.RequestSchema,
+			&i.ExecutionKey,
+			&i.Params,
+			&i.Scope,
+			&i.Fingerprint,
+			&i.Cause,
+			&i.ScheduleID,
+			&i.ScheduleRevision,
+			&i.ScheduledFor,
+			&i.OriginJobID,
+			&i.Priority,
+			&i.AvailableAt,
+			&i.DeadlineAt,
+			&i.State,
+			&i.AttemptCount,
+			&i.MaxAttempts,
+			&i.Generation,
+			&i.LastCode,
+			&i.AcceptedAttemptID,
+			&i.AcceptedHash,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listScheduleJobs = `-- name: ListScheduleJobs :many
+SELECT j.id, j.target_id, j.namespace, j.capability, j.request_schema, j.execution_key, j.params, j.scope, j.fingerprint, j.cause, j.schedule_id, j.schedule_revision, j.scheduled_for, j.origin_job_id, j.priority, j.available_at, j.deadline_at, j.state, j.attempt_count, j.max_attempts, j.generation, j.last_code, j.accepted_attempt_id, j.accepted_hash, j.created_at, j.updated_at FROM harvest.jobs j JOIN harvest.schedules s ON s.id=j.schedule_id
+WHERE s.id=$1::uuid AND j.namespace=s.namespace AND j.target_id=s.target_id
+ AND j.capability=s.capability AND j.request_schema=s.request_schema AND j.params=s.params AND j.scope=s.scope
+ AND j.created_at>=$2::timestamptz
+ AND ($3::uuid IS NULL OR j.id<$3)
+ORDER BY j.id DESC LIMIT $4
+`
+
+type ListScheduleJobsParams struct {
+	ScheduleID uuid.UUID  `json:"schedule_id"`
+	Since      time.Time  `json:"since"`
+	BeforeID   *uuid.UUID `json:"before_id"`
+	PageSize   int32      `json:"page_size"`
+}
+
+func (q *Queries) ListScheduleJobs(ctx context.Context, arg ListScheduleJobsParams) ([]HarvestJob, error) {
+	rows, err := q.db.Query(ctx, listScheduleJobs,
+		arg.ScheduleID,
+		arg.Since,
+		arg.BeforeID,
 		arg.PageSize,
 	)
 	if err != nil {

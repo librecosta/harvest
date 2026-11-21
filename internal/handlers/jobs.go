@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"strconv"
 	"time"
 	"uuid"
 
@@ -60,6 +61,68 @@ func (a *API) Jobs(c fiber.Ctx) error {
 	}
 	rows, err := a.engine.Jobs(c.Context(), request(c).principal, p)
 	return a.respond(c, 200, list(rows, p.Size, func(j q.HarvestJob) (jobView, uuid.UUID) { return showJob(j), j.ID }), err)
+}
+
+func (a *API) ScheduleJobs(c fiber.Ctx) error {
+	id, err := pathID(c)
+	if err != nil {
+		return a.respond(c, 200, nil, err)
+	}
+	var before *uuid.UUID
+	since := time.Unix(0, 0).UTC()
+	limit := int32(10)
+	bad := false
+	seen := make(map[string]bool)
+	c.Request().URI().QueryArgs().VisitAll(func(k, v []byte) {
+		key, value := string(k), string(v)
+		bad = bad || seen[key]
+		seen[key] = true
+		switch key {
+		case "since":
+			parsed, err := time.Parse(time.RFC3339Nano, value)
+			bad = bad || err != nil || parsed.Before(time.Unix(0, 0))
+			since = parsed
+		case "before":
+			parsed, err := queryID(value)
+			bad = bad || err != nil
+			before = &parsed
+		case "limit":
+			size, err := strconv.ParseInt(value, 10, 32)
+			bad = bad || err != nil || size < 1 || size > 20
+			limit = int32(size)
+		default:
+			bad = true
+		}
+	})
+	if bad {
+		return a.respond(c, 200, nil, execution.ErrInvalid)
+	}
+	schedule, rows, lastFailure, err := a.engine.ScheduleJobs(c.Context(), request(c).principal, id, before, since, limit)
+	if err != nil {
+		return a.respond(c, 200, nil, err)
+	}
+	type scheduledJob struct {
+		jobView
+		CreatedAt time.Time `json:"created_at"`
+	}
+	out := struct {
+		Schedule    scheduleView   `json:"schedule"`
+		Items       []scheduledJob `json:"items"`
+		Before      *uuid.UUID     `json:"before,omitempty"`
+		LastFailure *scheduledJob  `json:"last_failure,omitempty"`
+	}{Schedule: showSchedule(schedule), Items: []scheduledJob{}}
+	if len(rows) > int(limit) {
+		rows = rows[:limit]
+		out.Before = &rows[len(rows)-1].ID
+	}
+	for _, row := range rows {
+		out.Items = append(out.Items, scheduledJob{showJob(row), row.CreatedAt})
+	}
+	if lastFailure != nil {
+		job := scheduledJob{showJob(*lastFailure), lastFailure.CreatedAt}
+		out.LastFailure = &job
+	}
+	return a.respond(c, 200, out, nil)
 }
 
 func (a *API) Job(c fiber.Ctx) error {

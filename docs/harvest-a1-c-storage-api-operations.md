@@ -123,6 +123,7 @@ For a shared 4C8G host, start with a deliberately small pgxpool (e.g. 2-5 connec
 | `GET /api/v1/targets/:id`; `PATCH /api/v1/targets/:id` | Read and status/archive edit with revision guard. No implicit hard-delete. |
 | `GET /api/v1/schedules`; `POST /api/v1/schedules` | List and create schedules with validated UTC interval/cron and request scope. |
 | `GET /api/v1/schedules/:id`; `PATCH /api/v1/schedules/:id` | Read/edit/pause/resume; revision optimistic concurrency. |
+| `GET /api/v1/schedules/:id/jobs` | Read a schedule and its matching Jobs, newest first, with the latest failed or partial Job. The caller needs the schedule's namespace and capability. Optional `limit` is 1–20, `before` is the previous page's UUID cursor, and `since` is an inclusive RFC 3339 creation-time bound. |
 | `POST /api/v1/jobs`; `GET /api/v1/jobs/:id` | Enqueue manual or referenced retry Job; read durable status/sanitized summary. Use `Idempotency-Key` for submit. |
 | `POST /api/v1/jobs/:id/cancel` | Request cancellation; accepted or already-terminal explicit response. |
 | `GET /api/v1/observations/current`; `GET /api/v1/observations/history` | Scoped latest-good and bounded historical results; never raw credentials or unrestricted payload dumps. |

@@ -33,6 +33,22 @@ WHERE namespace = $1 AND id > sqlc.arg(after_id)::uuid
   AND (coalesce(cardinality(sqlc.arg(capabilities)::text[]), 0) = 0 OR capability = ANY(sqlc.arg(capabilities)::text[]))
 ORDER BY id LIMIT sqlc.arg(page_size);
 
+-- name: ListScheduleJobs :many
+SELECT j.* FROM harvest.jobs j JOIN harvest.schedules s ON s.id=j.schedule_id
+WHERE s.id=sqlc.arg(schedule_id)::uuid AND j.namespace=s.namespace AND j.target_id=s.target_id
+ AND j.capability=s.capability AND j.request_schema=s.request_schema AND j.params=s.params AND j.scope=s.scope
+ AND j.created_at>=sqlc.arg(since)::timestamptz
+ AND (sqlc.narg(before_id)::uuid IS NULL OR j.id<sqlc.narg(before_id))
+ORDER BY j.id DESC LIMIT sqlc.arg(page_size);
+
+-- name: LastFailedScheduleJob :one
+SELECT j.* FROM harvest.jobs j JOIN harvest.schedules s ON s.id=j.schedule_id
+WHERE s.id=sqlc.arg(schedule_id)::uuid AND j.namespace=s.namespace AND j.target_id=s.target_id
+ AND j.capability=s.capability AND j.request_schema=s.request_schema AND j.params=s.params AND j.scope=s.scope
+ AND j.created_at>=sqlc.arg(since)::timestamptz
+ AND j.state IN ('failed','partial')
+ORDER BY j.id DESC LIMIT 1;
+
 -- name: LockJob :one
 SELECT * FROM harvest.jobs WHERE id = $1 AND namespace = ANY(sqlc.arg(namespaces)::text[]) FOR UPDATE;
 
