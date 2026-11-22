@@ -115,9 +115,9 @@ func (q *Queries) ExpireQueuedJobs(ctx context.Context) (int64, error) {
 const insertJob = `-- name: InsertJob :one
 INSERT INTO harvest.jobs
     (id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, cause,
-     schedule_id, schedule_revision, scheduled_for, origin_job_id, priority, available_at, deadline_at, max_attempts)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
-RETURNING id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, cause, schedule_id, schedule_revision, scheduled_for, origin_job_id, priority, available_at, deadline_at, state, attempt_count, max_attempts, generation, last_code, accepted_attempt_id, accepted_hash, created_at, updated_at
+     schedule_id, schedule_revision, scheduled_for, origin_job_id, priority, available_at, deadline_at, max_attempts, execution_policy)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+RETURNING id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, cause, schedule_id, schedule_revision, scheduled_for, origin_job_id, priority, available_at, deadline_at, state, attempt_count, max_attempts, generation, last_code, accepted_attempt_id, accepted_hash, created_at, updated_at, execution_policy
 `
 
 type InsertJobParams struct {
@@ -139,6 +139,7 @@ type InsertJobParams struct {
 	AvailableAt      time.Time  `json:"available_at"`
 	DeadlineAt       time.Time  `json:"deadline_at"`
 	MaxAttempts      int32      `json:"max_attempts"`
+	ExecutionPolicy  []byte     `json:"execution_policy"`
 }
 
 func (q *Queries) InsertJob(ctx context.Context, arg InsertJobParams) (HarvestJob, error) {
@@ -161,6 +162,7 @@ func (q *Queries) InsertJob(ctx context.Context, arg InsertJobParams) (HarvestJo
 		arg.AvailableAt,
 		arg.DeadlineAt,
 		arg.MaxAttempts,
+		arg.ExecutionPolicy,
 	)
 	var i HarvestJob
 	err := row.Scan(
@@ -190,6 +192,7 @@ func (q *Queries) InsertJob(ctx context.Context, arg InsertJobParams) (HarvestJo
 		&i.AcceptedHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ExecutionPolicy,
 	)
 	return i, err
 }
@@ -197,11 +200,11 @@ func (q *Queries) InsertJob(ctx context.Context, arg InsertJobParams) (HarvestJo
 const insertManualJob = `-- name: InsertManualJob :one
 INSERT INTO harvest.jobs
     (id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, cause,
-     schedule_id, schedule_revision, priority, available_at, deadline_at, max_attempts)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'manual', $10, $11, 1, $12, $13, $14)
-ON CONFLICT (fingerprint, schedule_id) WHERE cause = 'manual' AND state IN ('queued', 'running', 'retry_wait', 'cancel_requested')
+     schedule_id, schedule_revision, priority, available_at, deadline_at, max_attempts, execution_policy)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'manual', $10, $11, 1, $12, $13, $14, $15)
+ON CONFLICT (fingerprint, schedule_id, schedule_revision) WHERE cause = 'manual' AND state IN ('queued', 'running', 'retry_wait', 'cancel_requested')
 DO UPDATE SET id = harvest.jobs.id
-RETURNING id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, cause, schedule_id, schedule_revision, scheduled_for, origin_job_id, priority, available_at, deadline_at, state, attempt_count, max_attempts, generation, last_code, accepted_attempt_id, accepted_hash, created_at, updated_at
+RETURNING id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, cause, schedule_id, schedule_revision, scheduled_for, origin_job_id, priority, available_at, deadline_at, state, attempt_count, max_attempts, generation, last_code, accepted_attempt_id, accepted_hash, created_at, updated_at, execution_policy
 `
 
 type InsertManualJobParams struct {
@@ -219,6 +222,7 @@ type InsertManualJobParams struct {
 	AvailableAt      time.Time  `json:"available_at"`
 	DeadlineAt       time.Time  `json:"deadline_at"`
 	MaxAttempts      int32      `json:"max_attempts"`
+	ExecutionPolicy  []byte     `json:"execution_policy"`
 }
 
 func (q *Queries) InsertManualJob(ctx context.Context, arg InsertManualJobParams) (HarvestJob, error) {
@@ -237,6 +241,7 @@ func (q *Queries) InsertManualJob(ctx context.Context, arg InsertManualJobParams
 		arg.AvailableAt,
 		arg.DeadlineAt,
 		arg.MaxAttempts,
+		arg.ExecutionPolicy,
 	)
 	var i HarvestJob
 	err := row.Scan(
@@ -266,12 +271,13 @@ func (q *Queries) InsertManualJob(ctx context.Context, arg InsertManualJobParams
 		&i.AcceptedHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ExecutionPolicy,
 	)
 	return i, err
 }
 
 const job = `-- name: Job :one
-SELECT id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, cause, schedule_id, schedule_revision, scheduled_for, origin_job_id, priority, available_at, deadline_at, state, attempt_count, max_attempts, generation, last_code, accepted_attempt_id, accepted_hash, created_at, updated_at FROM harvest.jobs WHERE id = $1 AND namespace = ANY($2::text[])
+SELECT id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, cause, schedule_id, schedule_revision, scheduled_for, origin_job_id, priority, available_at, deadline_at, state, attempt_count, max_attempts, generation, last_code, accepted_attempt_id, accepted_hash, created_at, updated_at, execution_policy FROM harvest.jobs WHERE id = $1 AND namespace = ANY($2::text[])
 `
 
 type JobParams struct {
@@ -309,6 +315,7 @@ func (q *Queries) Job(ctx context.Context, arg JobParams) (HarvestJob, error) {
 		&i.AcceptedHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ExecutionPolicy,
 	)
 	return i, err
 }
@@ -352,7 +359,7 @@ func (q *Queries) JobSummary(ctx context.Context, arg JobSummaryParams) ([]JobSu
 }
 
 const lastFailedScheduleJob = `-- name: LastFailedScheduleJob :one
-SELECT j.id, j.target_id, j.namespace, j.capability, j.request_schema, j.execution_key, j.params, j.scope, j.fingerprint, j.cause, j.schedule_id, j.schedule_revision, j.scheduled_for, j.origin_job_id, j.priority, j.available_at, j.deadline_at, j.state, j.attempt_count, j.max_attempts, j.generation, j.last_code, j.accepted_attempt_id, j.accepted_hash, j.created_at, j.updated_at FROM harvest.jobs j JOIN harvest.schedules s ON s.id=j.schedule_id
+SELECT j.id, j.target_id, j.namespace, j.capability, j.request_schema, j.execution_key, j.params, j.scope, j.fingerprint, j.cause, j.schedule_id, j.schedule_revision, j.scheduled_for, j.origin_job_id, j.priority, j.available_at, j.deadline_at, j.state, j.attempt_count, j.max_attempts, j.generation, j.last_code, j.accepted_attempt_id, j.accepted_hash, j.created_at, j.updated_at, j.execution_policy FROM harvest.jobs j JOIN harvest.schedules s ON s.id=j.schedule_id
 WHERE s.id=$1::uuid AND j.namespace=s.namespace AND j.target_id=s.target_id
  AND j.capability=s.capability AND j.request_schema=s.request_schema AND j.params=s.params AND j.scope=s.scope
  AND j.created_at>=$2::timestamptz
@@ -395,12 +402,13 @@ func (q *Queries) LastFailedScheduleJob(ctx context.Context, arg LastFailedSched
 		&i.AcceptedHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ExecutionPolicy,
 	)
 	return i, err
 }
 
 const listCollectionJobs = `-- name: ListCollectionJobs :many
-SELECT id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, cause, schedule_id, schedule_revision, scheduled_for, origin_job_id, priority, available_at, deadline_at, state, attempt_count, max_attempts, generation, last_code, accepted_attempt_id, accepted_hash, created_at, updated_at FROM harvest.jobs j
+SELECT id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, cause, schedule_id, schedule_revision, scheduled_for, origin_job_id, priority, available_at, deadline_at, state, attempt_count, max_attempts, generation, last_code, accepted_attempt_id, accepted_hash, created_at, updated_at, execution_policy FROM harvest.jobs j
 WHERE j.namespace=$1 AND j.schedule_id IS NOT NULL
  AND (coalesce(cardinality($2::text[]),0)=0 OR j.capability=ANY($2::text[]))
  AND ($3::text='' OR j.capability=$3)
@@ -471,6 +479,7 @@ func (q *Queries) ListCollectionJobs(ctx context.Context, arg ListCollectionJobs
 			&i.AcceptedHash,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ExecutionPolicy,
 		); err != nil {
 			return nil, err
 		}
@@ -483,7 +492,7 @@ func (q *Queries) ListCollectionJobs(ctx context.Context, arg ListCollectionJobs
 }
 
 const listJobs = `-- name: ListJobs :many
-SELECT id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, cause, schedule_id, schedule_revision, scheduled_for, origin_job_id, priority, available_at, deadline_at, state, attempt_count, max_attempts, generation, last_code, accepted_attempt_id, accepted_hash, created_at, updated_at FROM harvest.jobs
+SELECT id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, cause, schedule_id, schedule_revision, scheduled_for, origin_job_id, priority, available_at, deadline_at, state, attempt_count, max_attempts, generation, last_code, accepted_attempt_id, accepted_hash, created_at, updated_at, execution_policy FROM harvest.jobs
 WHERE namespace = $1 AND id > $2::uuid
   AND (coalesce(cardinality($3::text[]), 0) = 0 OR capability = ANY($3::text[]))
 ORDER BY id LIMIT $4
@@ -537,6 +546,7 @@ func (q *Queries) ListJobs(ctx context.Context, arg ListJobsParams) ([]HarvestJo
 			&i.AcceptedHash,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ExecutionPolicy,
 		); err != nil {
 			return nil, err
 		}
@@ -549,7 +559,7 @@ func (q *Queries) ListJobs(ctx context.Context, arg ListJobsParams) ([]HarvestJo
 }
 
 const listScheduleJobs = `-- name: ListScheduleJobs :many
-SELECT j.id, j.target_id, j.namespace, j.capability, j.request_schema, j.execution_key, j.params, j.scope, j.fingerprint, j.cause, j.schedule_id, j.schedule_revision, j.scheduled_for, j.origin_job_id, j.priority, j.available_at, j.deadline_at, j.state, j.attempt_count, j.max_attempts, j.generation, j.last_code, j.accepted_attempt_id, j.accepted_hash, j.created_at, j.updated_at FROM harvest.jobs j JOIN harvest.schedules s ON s.id=j.schedule_id
+SELECT j.id, j.target_id, j.namespace, j.capability, j.request_schema, j.execution_key, j.params, j.scope, j.fingerprint, j.cause, j.schedule_id, j.schedule_revision, j.scheduled_for, j.origin_job_id, j.priority, j.available_at, j.deadline_at, j.state, j.attempt_count, j.max_attempts, j.generation, j.last_code, j.accepted_attempt_id, j.accepted_hash, j.created_at, j.updated_at, j.execution_policy FROM harvest.jobs j JOIN harvest.schedules s ON s.id=j.schedule_id
 WHERE s.id=$1::uuid AND j.namespace=s.namespace AND j.target_id=s.target_id
  AND j.capability=s.capability AND j.request_schema=s.request_schema AND j.params=s.params AND j.scope=s.scope
  AND j.created_at>=$2::timestamptz
@@ -605,6 +615,7 @@ func (q *Queries) ListScheduleJobs(ctx context.Context, arg ListScheduleJobsPara
 			&i.AcceptedHash,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ExecutionPolicy,
 		); err != nil {
 			return nil, err
 		}
@@ -617,12 +628,15 @@ func (q *Queries) ListScheduleJobs(ctx context.Context, arg ListScheduleJobsPara
 }
 
 const lockClaimableJob = `-- name: LockClaimableJob :one
-SELECT j.id, j.target_id, j.namespace, j.capability, j.request_schema, j.execution_key, j.params, j.scope, j.fingerprint, j.cause, j.schedule_id, j.schedule_revision, j.scheduled_for, j.origin_job_id, j.priority, j.available_at, j.deadline_at, j.state, j.attempt_count, j.max_attempts, j.generation, j.last_code, j.accepted_attempt_id, j.accepted_hash, j.created_at, j.updated_at FROM harvest.jobs j
+SELECT j.id, j.target_id, j.namespace, j.capability, j.request_schema, j.execution_key, j.params, j.scope, j.fingerprint, j.cause, j.schedule_id, j.schedule_revision, j.scheduled_for, j.origin_job_id, j.priority, j.available_at, j.deadline_at, j.state, j.attempt_count, j.max_attempts, j.generation, j.last_code, j.accepted_attempt_id, j.accepted_hash, j.created_at, j.updated_at, j.execution_policy FROM harvest.jobs j
 JOIN harvest.targets t ON t.id = j.target_id
 WHERE j.state IN ('queued', 'retry_wait') AND j.available_at <= statement_timestamp()
   AND j.deadline_at > statement_timestamp() AND j.attempt_count < j.max_attempts
-  AND (j.execution_key = ANY($1::text[]) OR
-    j.execution_key || '|' || j.namespace || '|' || coalesce(j.scope->>'egress_region','') = ANY($2::text[]))
+  AND (j.execution_key = ANY($1::text[]) OR EXISTS (
+    SELECT FROM jsonb_array_elements_text(coalesce(j.execution_policy->'regions',
+        jsonb_build_array(coalesce(j.scope->>'egress_region','')))) AS region(value)
+    WHERE j.execution_key || '|' || j.namespace || '|' || region.value || '|' ||
+        coalesce(j.execution_policy->>'mode','') = ANY($2::text[])))
   AND j.namespace = ANY($3::text[])
   AND t.state = 'active'
 ORDER BY CASE WHEN j.available_at <= statement_timestamp() - interval '30 seconds' THEN 2 ELSE j.priority END DESC,
@@ -666,12 +680,13 @@ func (q *Queries) LockClaimableJob(ctx context.Context, arg LockClaimableJobPara
 		&i.AcceptedHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ExecutionPolicy,
 	)
 	return i, err
 }
 
 const lockExpiredJob = `-- name: LockExpiredJob :one
-SELECT j.id, j.target_id, j.namespace, j.capability, j.request_schema, j.execution_key, j.params, j.scope, j.fingerprint, j.cause, j.schedule_id, j.schedule_revision, j.scheduled_for, j.origin_job_id, j.priority, j.available_at, j.deadline_at, j.state, j.attempt_count, j.max_attempts, j.generation, j.last_code, j.accepted_attempt_id, j.accepted_hash, j.created_at, j.updated_at FROM harvest.attempts a JOIN harvest.jobs j ON j.id = a.job_id AND j.generation = a.generation
+SELECT j.id, j.target_id, j.namespace, j.capability, j.request_schema, j.execution_key, j.params, j.scope, j.fingerprint, j.cause, j.schedule_id, j.schedule_revision, j.scheduled_for, j.origin_job_id, j.priority, j.available_at, j.deadline_at, j.state, j.attempt_count, j.max_attempts, j.generation, j.last_code, j.accepted_attempt_id, j.accepted_hash, j.created_at, j.updated_at, j.execution_policy FROM harvest.attempts a JOIN harvest.jobs j ON j.id = a.job_id AND j.generation = a.generation
 WHERE a.state = 'running' AND a.lease_until <= statement_timestamp() AND j.state IN ('running', 'cancel_requested')
 ORDER BY a.lease_until, a.id LIMIT 1 FOR UPDATE OF j SKIP LOCKED
 `
@@ -706,12 +721,13 @@ func (q *Queries) LockExpiredJob(ctx context.Context) (HarvestJob, error) {
 		&i.AcceptedHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ExecutionPolicy,
 	)
 	return i, err
 }
 
 const lockJob = `-- name: LockJob :one
-SELECT id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, cause, schedule_id, schedule_revision, scheduled_for, origin_job_id, priority, available_at, deadline_at, state, attempt_count, max_attempts, generation, last_code, accepted_attempt_id, accepted_hash, created_at, updated_at FROM harvest.jobs WHERE id = $1 AND namespace = ANY($2::text[]) FOR UPDATE
+SELECT id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, cause, schedule_id, schedule_revision, scheduled_for, origin_job_id, priority, available_at, deadline_at, state, attempt_count, max_attempts, generation, last_code, accepted_attempt_id, accepted_hash, created_at, updated_at, execution_policy FROM harvest.jobs WHERE id = $1 AND namespace = ANY($2::text[]) FOR UPDATE
 `
 
 type LockJobParams struct {
@@ -749,6 +765,7 @@ func (q *Queries) LockJob(ctx context.Context, arg LockJobParams) (HarvestJob, e
 		&i.AcceptedHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ExecutionPolicy,
 	)
 	return i, err
 }
@@ -756,7 +773,7 @@ func (q *Queries) LockJob(ctx context.Context, arg LockJobParams) (HarvestJob, e
 const markJobClaimed = `-- name: MarkJobClaimed :one
 UPDATE harvest.jobs
 SET state = 'running', generation = generation + 1, attempt_count = attempt_count + 1, updated_at = $2
-WHERE id = $1 RETURNING id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, cause, schedule_id, schedule_revision, scheduled_for, origin_job_id, priority, available_at, deadline_at, state, attempt_count, max_attempts, generation, last_code, accepted_attempt_id, accepted_hash, created_at, updated_at
+WHERE id = $1 RETURNING id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, cause, schedule_id, schedule_revision, scheduled_for, origin_job_id, priority, available_at, deadline_at, state, attempt_count, max_attempts, generation, last_code, accepted_attempt_id, accepted_hash, created_at, updated_at, execution_policy
 `
 
 type MarkJobClaimedParams struct {
@@ -794,6 +811,7 @@ func (q *Queries) MarkJobClaimed(ctx context.Context, arg MarkJobClaimedParams) 
 		&i.AcceptedHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ExecutionPolicy,
 	)
 	return i, err
 }
@@ -834,7 +852,7 @@ const setJobState = `-- name: SetJobState :one
 UPDATE harvest.jobs SET state = $2, last_code = $3, available_at = $4, updated_at = $5,
     accepted_attempt_id = coalesce($6::uuid, accepted_attempt_id),
     accepted_hash = coalesce($7::bytea, accepted_hash)
-WHERE id = $1 RETURNING id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, cause, schedule_id, schedule_revision, scheduled_for, origin_job_id, priority, available_at, deadline_at, state, attempt_count, max_attempts, generation, last_code, accepted_attempt_id, accepted_hash, created_at, updated_at
+WHERE id = $1 RETURNING id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, cause, schedule_id, schedule_revision, scheduled_for, origin_job_id, priority, available_at, deadline_at, state, attempt_count, max_attempts, generation, last_code, accepted_attempt_id, accepted_hash, created_at, updated_at, execution_policy
 `
 
 type SetJobStateParams struct {
@@ -885,6 +903,7 @@ func (q *Queries) SetJobState(ctx context.Context, arg SetJobStateParams) (Harve
 		&i.AcceptedHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ExecutionPolicy,
 	)
 	return i, err
 }

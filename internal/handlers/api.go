@@ -117,7 +117,8 @@ func (a *API) respond(c fiber.Ctx, status int, value any, err error) error {
 		return problem(c, 409, err.Error(), info.id)
 	case errors.Is(err, execution.ErrPolicyUnavailable):
 		return problem(c, 503, err.Error(), info.id)
-	case errors.Is(err, execution.ErrInvalid):
+	case errors.Is(err, execution.ErrInvalid), errors.Is(err, execution.ErrScheduleRegion),
+		errors.Is(err, execution.ErrScheduleMode), errors.Is(err, execution.ErrScheduleRetry), errors.Is(err, execution.ErrScheduleInterval):
 		return problem(c, 400, err.Error(), info.id)
 	case errors.Is(err, execution.ErrForbidden):
 		return problem(c, 403, err.Error(), info.id)

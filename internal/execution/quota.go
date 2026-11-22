@@ -169,7 +169,7 @@ func (e *Engine) Permit(ctx context.Context, p config.Principal, id uuid.UUID, i
 		if err != nil {
 			return egress.Grant{}, err
 		}
-		plan, _ := e.plan(p, rule, scope.EgressRegion, paths)
+		plan, _, _ := e.taskNetwork(p, cap, rule, scope.EgressRegion, executionPolicy(job.ExecutionPolicy), paths, attempt.EgressRegion)
 		if plan == nil || in.Profile != plan.Profile {
 			return egress.Grant{}, ErrForbidden
 		}

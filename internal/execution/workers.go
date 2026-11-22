@@ -165,6 +165,20 @@ func (e *Engine) Claim(ctx context.Context, p config.Principal, id uuid.UUID) (*
 		if err != nil {
 			return nil, err
 		}
+		var network *egress.Plan
+		var egressRegion *string
+		if work.capability.Network != nil {
+			paths, err := decodePaths(w.NetworkPaths)
+			if err != nil {
+				return nil, err
+			}
+			plan, region, ready := e.taskNetwork(p, work.capability, e.source(job.Capability, job.Namespace),
+				task.Scope.EgressRegion, executionPolicy(job.ExecutionPolicy), paths, nil)
+			if !ready {
+				return nil, nil
+			}
+			network, egressRegion = plan, &region
+		}
 		if work.capability.Network != nil && work.capability.Network.Candidate {
 			task.WebPath, task.AssetSizes, err = assetPath(ctx, db, task)
 			if err != nil && !errors.Is(err, egress.ErrCandidate) {
@@ -181,23 +195,16 @@ func (e *Engine) Claim(ctx context.Context, p config.Principal, id uuid.UUID) (*
 			networkRevision = e.policy.RoutingRevision
 		}
 		a, err := db.InsertAttempt(ctx, q.InsertAttemptParams{
-			ID: uuid.NewV7(), JobID: job.ID, WorkerID: w.ID, Generation: job.Generation, ClaimedAt: now, LeaseUntil: until, NetworkRevision: networkRevision,
+			ID: uuid.NewV7(), JobID: job.ID, WorkerID: w.ID, Generation: job.Generation, ClaimedAt: now, LeaseUntil: until,
+			NetworkRevision: networkRevision, EgressRegion: egressRegion,
 		})
 		if err != nil {
 			return nil, err
 		}
-		claim := &Claim{
+		return &Claim{
 			Fence: Fence{job.ID, w.ID, job.Generation}, AttemptID: a.ID,
-			LeaseUntil: until.UTC(), LeaseMS: until.Sub(now).Milliseconds(), Task: task,
-		}
-		if cap, _ := e.Registry.Capability(task.Offer.Capability); cap.Network != nil {
-			paths, err := decodePaths(w.NetworkPaths)
-			if err != nil {
-				return nil, err
-			}
-			claim.Network, _ = e.plan(p, e.source(task.Offer.Capability, task.Namespace), task.Scope.EgressRegion, paths)
-		}
-		return claim, nil
+			LeaseUntil: until.UTC(), LeaseMS: until.Sub(now).Milliseconds(), Task: task, Network: network,
+		}, nil
 	})
 }
 
@@ -327,7 +334,9 @@ func (e *Engine) Complete(ctx context.Context, p config.Principal, id uuid.UUID,
 		}
 		state, available := retryState(job, now, result.State, retryable)
 		if state == "retry_wait" && result.Code == "network_quota_deferred" {
-			available = now.Add(10 * time.Second)
+			if floor := now.Add(10 * time.Second); available.Before(floor) {
+				available = floor
+			}
 			if !available.Before(job.DeadlineAt) {
 				state, available = result.State, now
 			}

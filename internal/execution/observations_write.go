@@ -313,6 +313,7 @@ func storeSegment(ctx context.Context, db *q.Queries, job q.HarvestJob, attempt 
 		ID: id, Stream: job.Namespace, TargetID: job.TargetID, Capability: job.Capability, OutputSchema: s.OutputSchema, ScopeKey: s.key,
 		Scope: s.scopeJSON, State: s.State, ObservedAt: s.ObservedAt, ReceivedAt: now, Data: s.Data, ContentHash: s.hash,
 		Source: s.Source, Evidence: s.Evidence, Sample: sample && s.action == "sample", JobID: job.ID, AttemptID: attempt.ID, StoredBytes: s.observationBytes(),
+		ExecutionEgressRegion: attempt.EgressRegion,
 	}); err != nil || s.action == "diagnostic" {
 		return err
 	}

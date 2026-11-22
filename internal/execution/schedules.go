@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	json "encoding/json/v2"
 	"errors"
 	"strings"
 	"time"
@@ -117,11 +118,18 @@ func (e *Engine) CreateSchedule(ctx context.Context, p config.Principal, in Sche
 		if err != nil {
 			return q.HarvestSchedule{}, err
 		}
+		if err := e.validateExecutionPolicy(w.capability, w.target.Namespace, r.Policy, in.ExecutionPolicy); err != nil {
+			return q.HarvestSchedule{}, err
+		}
+		execution, err := json.Marshal(in.ExecutionPolicy)
+		if err != nil {
+			return q.HarvestSchedule{}, ErrInvalid
+		}
 		return db.InsertSchedule(ctx, q.InsertScheduleParams{
 			ID: uuid.NewV7(), TargetID: w.target.ID, Namespace: w.target.Namespace, Capability: w.capability.Capability,
 			RequestSchema: w.capability.RequestSchema, ExecutionKey: w.capability.Key(), Params: w.params, Scope: w.scope,
 			Fingerprint: w.fingerprint, IntervalSeconds: r.IntervalSeconds, Cron: r.Cron, AnchorAt: r.AnchorAt,
-			NextDueAt: c.first(r.AnchorAt), Policy: r.Policy, Enabled: in.Enabled == nil || *in.Enabled,
+			NextDueAt: c.first(r.AnchorAt), Policy: r.Policy, Enabled: in.Enabled == nil || *in.Enabled, ExecutionPolicy: execution,
 		})
 	})
 }
@@ -149,7 +157,7 @@ func (e *Engine) EditSchedule(ctx context.Context, p config.Principal, id uuid.U
 	if e.draining.Load() {
 		return q.HarvestSchedule{}, ErrDraining
 	}
-	if patch.Revision < 1 || (patch.Request == nil && patch.Recurrence == nil && patch.Enabled == nil) {
+	if patch.Revision < 1 || (patch.Request == nil && patch.Recurrence == nil && patch.Enabled == nil && patch.ExecutionPolicy == nil) {
 		return q.HarvestSchedule{}, ErrInvalid
 	}
 	return tx(ctx, e, func(db *q.Queries) (q.HarvestSchedule, error) {
@@ -182,7 +190,7 @@ func (e *Engine) EditSchedule(ctx context.Context, p config.Principal, id uuid.U
 			r.AnchorAt = pgTime(r.AnchorAt)
 			r.Cron = strings.Join(strings.Fields(r.Cron), " ")
 		}
-		if patch.Request != nil || patch.Recurrence != nil {
+		if patch.Request != nil || patch.Recurrence != nil || patch.ExecutionPolicy != nil {
 			if cap.Execute == nil || cap.Key() != s.ExecutionKey {
 				return s, ErrUnsupported
 			}
@@ -191,10 +199,32 @@ func (e *Engine) EditSchedule(ctx context.Context, p config.Principal, id uuid.U
 			}
 			c, err := parseCadence(r, cap.MinInterval)
 			if err != nil {
-				return s, err
+				return s, ErrScheduleInterval
 			}
 			if patch.Recurrence != nil && r != recurrence(s) {
-				s.NextDueAt = c.first(r.AnchorAt)
+				due := c.first(r.AnchorAt)
+				if r.AnchorAt.Equal(s.AnchorAt) {
+					now, err := db.DBNow(ctx)
+					if err != nil {
+						return s, err
+					}
+					if !due.After(now) {
+						// Keep the anchor and start from the next slot of the new cadence.
+						_, due, _ = c.slots(due, now)
+					}
+				}
+				s.NextDueAt = due
+			}
+			policy := executionPolicy(s.ExecutionPolicy)
+			if patch.ExecutionPolicy != nil {
+				policy = *patch.ExecutionPolicy
+			}
+			if err := e.validateExecutionPolicy(cap, s.Namespace, r.Policy, policy); err != nil {
+				return s, err
+			}
+			s.ExecutionPolicy, err = json.Marshal(policy)
+			if err != nil {
+				return s, ErrInvalid
 			}
 		}
 		if patch.Enabled != nil {
@@ -203,7 +233,7 @@ func (e *Engine) EditSchedule(ctx context.Context, p config.Principal, id uuid.U
 		return db.UpdateSchedule(ctx, q.UpdateScheduleParams{
 			ID: s.ID, Capability: s.Capability, RequestSchema: s.RequestSchema, ExecutionKey: s.ExecutionKey,
 			Params: s.Params, Scope: s.Scope, Fingerprint: s.Fingerprint, IntervalSeconds: r.IntervalSeconds,
-			Cron: r.Cron, AnchorAt: r.AnchorAt, Policy: r.Policy, NextDueAt: s.NextDueAt, Enabled: s.Enabled,
+			Cron: r.Cron, AnchorAt: r.AnchorAt, Policy: r.Policy, NextDueAt: s.NextDueAt, Enabled: s.Enabled, ExecutionPolicy: s.ExecutionPolicy,
 		})
 	})
 }
@@ -238,6 +268,7 @@ func (e *Engine) reconcileOne(ctx context.Context, offers []string) (bool, error
 			return false, ErrInvalid
 		}
 		args := w.jobArgs(now, "scheduled")
+		args.ExecutionPolicy, args.MaxAttempts = scheduleJobPolicy(s)
 		args.ScheduleID, args.ScheduleRevision, args.ScheduledFor = &s.ID, &s.Revision, &latest
 		if s.Policy == "point_in_time" {
 			args.DeadlineAt, args.MaxAttempts = latest.Add(pointWindow), 1

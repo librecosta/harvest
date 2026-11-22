@@ -35,15 +35,16 @@ type jobView struct {
 }
 
 type attemptView struct {
-	ID          uuid.UUID  `json:"id"`
-	WorkerID    uuid.UUID  `json:"worker_id"`
-	Generation  int64      `json:"generation"`
-	State       string     `json:"state"`
-	Code        string     `json:"code,omitempty"`
-	ClaimedAt   time.Time  `json:"claimed_at"`
-	HeartbeatAt time.Time  `json:"heartbeat_at"`
-	LeaseUntil  time.Time  `json:"lease_until"`
-	EndedAt     *time.Time `json:"ended_at,omitempty"`
+	ID           uuid.UUID  `json:"id"`
+	WorkerID     uuid.UUID  `json:"worker_id"`
+	Generation   int64      `json:"generation"`
+	State        string     `json:"state"`
+	Code         string     `json:"code,omitempty"`
+	ClaimedAt    time.Time  `json:"claimed_at"`
+	HeartbeatAt  time.Time  `json:"heartbeat_at"`
+	LeaseUntil   time.Time  `json:"lease_until"`
+	EndedAt      *time.Time `json:"ended_at,omitempty"`
+	EgressRegion *string    `json:"egress_region,omitempty"`
 }
 
 func showJob(j q.HarvestJob) jobView {
@@ -204,7 +205,7 @@ func (a *API) Job(c fiber.Ctx) error {
 	history := make([]attemptView, 0, len(attempts))
 	for _, a := range attempts {
 		history = append(history, attemptView{a.ID, a.WorkerID, a.Generation, a.State, a.ErrorCode, a.ClaimedAt,
-			a.HeartbeatAt, a.LeaseUntil, a.EndedAt})
+			a.HeartbeatAt, a.LeaseUntil, a.EndedAt, a.EgressRegion})
 	}
 	return a.respond(c, 200, struct {
 		Job     jobView                     `json:"job"`

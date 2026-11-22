@@ -1,16 +1,16 @@
 -- name: InsertJob :one
 INSERT INTO harvest.jobs
     (id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, cause,
-     schedule_id, schedule_revision, scheduled_for, origin_job_id, priority, available_at, deadline_at, max_attempts)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+     schedule_id, schedule_revision, scheduled_for, origin_job_id, priority, available_at, deadline_at, max_attempts, execution_policy)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, sqlc.arg(execution_policy))
 RETURNING *;
 
 -- name: InsertManualJob :one
 INSERT INTO harvest.jobs
     (id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, cause,
-     schedule_id, schedule_revision, priority, available_at, deadline_at, max_attempts)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'manual', $10, $11, 1, $12, $13, $14)
-ON CONFLICT (fingerprint, schedule_id) WHERE cause = 'manual' AND state IN ('queued', 'running', 'retry_wait', 'cancel_requested')
+     schedule_id, schedule_revision, priority, available_at, deadline_at, max_attempts, execution_policy)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'manual', $10, $11, 1, $12, $13, $14, sqlc.arg(execution_policy))
+ON CONFLICT (fingerprint, schedule_id, schedule_revision) WHERE cause = 'manual' AND state IN ('queued', 'running', 'retry_wait', 'cancel_requested')
 DO UPDATE SET id = harvest.jobs.id
 RETURNING *;
 
@@ -70,8 +70,11 @@ SELECT j.* FROM harvest.jobs j
 JOIN harvest.targets t ON t.id = j.target_id
 WHERE j.state IN ('queued', 'retry_wait') AND j.available_at <= statement_timestamp()
   AND j.deadline_at > statement_timestamp() AND j.attempt_count < j.max_attempts
-  AND (j.execution_key = ANY(sqlc.arg(offers)::text[]) OR
-    j.execution_key || '|' || j.namespace || '|' || coalesce(j.scope->>'egress_region','') = ANY(sqlc.arg(network_offers)::text[]))
+  AND (j.execution_key = ANY(sqlc.arg(offers)::text[]) OR EXISTS (
+    SELECT FROM jsonb_array_elements_text(coalesce(j.execution_policy->'regions',
+        jsonb_build_array(coalesce(j.scope->>'egress_region','')))) AS region(value)
+    WHERE j.execution_key || '|' || j.namespace || '|' || region.value || '|' ||
+        coalesce(j.execution_policy->>'mode','') = ANY(sqlc.arg(network_offers)::text[])))
   AND j.namespace = ANY(sqlc.arg(namespaces)::text[])
   AND t.state = 'active'
 ORDER BY CASE WHEN j.available_at <= statement_timestamp() - interval '30 seconds' THEN 2 ELSE j.priority END DESC,

@@ -17,18 +17,31 @@ import (
 const jobLifetime = 5 * time.Minute
 const maxAttempts = 3
 
+func scheduleJobPolicy(schedule q.HarvestSchedule) ([]byte, int32) {
+	if schedule.Policy == "point_in_time" {
+		return schedule.ExecutionPolicy, 1
+	}
+	attempts := executionPolicy(schedule.ExecutionPolicy).MaxAttempts
+	if attempts == 0 {
+		attempts = maxAttempts
+	}
+	return schedule.ExecutionPolicy, attempts
+}
+
 func (w work) jobArgs(now time.Time, cause string) q.InsertJobParams {
 	return q.InsertJobParams{
 		ID: uuid.NewV7(), TargetID: w.target.ID, Namespace: w.target.Namespace, Capability: w.capability.Capability,
 		RequestSchema: w.capability.RequestSchema, ExecutionKey: w.capability.Key(), Params: w.params, Scope: w.scope,
 		Fingerprint: w.fingerprint, Cause: cause, AvailableAt: now, DeadlineAt: now.Add(jobLifetime), MaxAttempts: maxAttempts,
+		ExecutionPolicy: []byte("{}"),
 	}
 }
 
 func (e *Engine) SubmitJob(ctx context.Context, p config.Principal, key string, in Submit) (q.HarvestJob, error) {
 	e.admission.RLock()
 	defer e.admission.RUnlock()
-	if !validSubmissionKey(key) || (in.Request == nil) == (in.ScheduleID == nil) {
+	if !validSubmissionKey(key) || (in.Request == nil) == (in.ScheduleID == nil) ||
+		in.ExpectedScheduleRevision < 0 || in.ExpectedScheduleRevision != 0 && in.ScheduleID == nil {
 		return q.HarvestJob{}, ErrInvalid
 	}
 	if e.draining.Load() {
@@ -40,6 +53,9 @@ func (e *Engine) SubmitJob(ctx context.Context, p config.Principal, key string, 
 			err      error
 			revision *int64
 			digest   []byte
+			policy         = []byte("{}")
+			attempts int32 = maxAttempts
+			lifetime       = jobLifetime
 		)
 		if in.ScheduleID != nil {
 			// A retry of Run Now always refers to the first accepted invocation,
@@ -69,15 +85,25 @@ func (e *Engine) SubmitJob(ctx context.Context, p config.Principal, key string, 
 			if !canCapability(p, s.Capability) {
 				return q.HarvestJob{}, ErrForbidden
 			}
+			if in.ExpectedScheduleRevision != 0 && s.Revision != in.ExpectedScheduleRevision {
+				return q.HarvestJob{}, ErrConflict
+			}
 			w, err = e.resolveStored(ctx, db, p.Namespaces, s.TargetID, s.Capability, s.ExecutionKey,
 				s.Params, s.Scope, s.Fingerprint)
 			if err != nil {
 				return q.HarvestJob{}, err
 			}
 			revision = &s.Revision
+			policy, attempts = scheduleJobPolicy(s)
+			if s.Policy == "point_in_time" {
+				lifetime = pointWindow
+			}
 		}
 		if w.target.State != "active" {
 			return q.HarvestJob{}, ErrConflict
+		}
+		if w.capability.PointInTimeOnly {
+			attempts, lifetime = 1, pointWindow
 		}
 		now, err := db.DBNow(ctx)
 		if err != nil {
@@ -87,7 +113,7 @@ func (e *Engine) SubmitJob(ctx context.Context, p config.Principal, key string, 
 			ID: uuid.NewV7(), TargetID: w.target.ID, Namespace: w.target.Namespace, Capability: w.capability.Capability,
 			RequestSchema: w.capability.RequestSchema, ExecutionKey: w.capability.Key(), Params: w.params, Scope: w.scope,
 			Fingerprint: w.fingerprint, ScheduleID: in.ScheduleID, ScheduleRevision: revision,
-			AvailableAt: now, DeadlineAt: now.Add(jobLifetime), MaxAttempts: maxAttempts,
+			AvailableAt: now, DeadlineAt: now.Add(lifetime), MaxAttempts: attempts, ExecutionPolicy: policy,
 		}
 		job, err := db.InsertManualJob(ctx, args)
 		if err != nil {
@@ -145,6 +171,13 @@ func (e *Engine) RetryJob(ctx context.Context, p config.Principal, key string, i
 		if w.target.State != "active" {
 			return old, ErrConflict
 		}
+		pointSample := old.ScheduleID != nil && old.MaxAttempts == 1 &&
+			(old.ScheduledFor != nil && old.DeadlineAt.Equal(old.ScheduledFor.Add(pointWindow)) ||
+				old.ScheduledFor == nil && old.DeadlineAt.Equal(old.AvailableAt.Add(pointWindow)))
+		if pointSample || w.capability.PointInTimeOnly ||
+			old.LastCode == "upstream_throttled" || old.LastCode == "upstream_auth" || old.LastCode == "policy_denied" {
+			return old, ErrConflict
+		}
 		now, err := db.DBNow(ctx)
 		if err != nil {
 			return old, err
@@ -152,6 +185,7 @@ func (e *Engine) RetryJob(ctx context.Context, p config.Principal, key string, i
 		args := w.jobArgs(now, "retry_requested")
 		args.OriginJobID, args.Priority = &id, 1
 		args.ScheduleID, args.ScheduleRevision = old.ScheduleID, old.ScheduleRevision
+		args.ExecutionPolicy, args.MaxAttempts = old.ExecutionPolicy, old.MaxAttempts
 		job, err := db.InsertJob(ctx, args)
 		if err != nil {
 			return job, err
@@ -284,6 +318,9 @@ func setState(ctx context.Context, db *q.Queries, job q.HarvestJob, state, code 
 func retryState(job q.HarvestJob, now time.Time, terminalState string, retryable bool) (string, time.Time) {
 	if retryable && job.AttemptCount > 0 && job.AttemptCount < job.MaxAttempts {
 		delay := time.Second * time.Duration(1<<(job.AttemptCount-1))
+		if executionPolicy(job.ExecutionPolicy).Backoff == "fixed" {
+			delay = 2 * time.Second
+		}
 		if next := now.Add(delay); next.Before(job.DeadlineAt) {
 			return "retry_wait", next
 		}

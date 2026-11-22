@@ -26,8 +26,8 @@ RETURNING *;
 -- name: InsertSchedule :one
 INSERT INTO harvest.schedules
     (id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint,
-     interval_seconds, cron, anchor_at, next_due_at, policy, enabled)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+     interval_seconds, cron, anchor_at, next_due_at, policy, enabled, execution_policy)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, sqlc.arg(execution_policy))
 ON CONFLICT (fingerprint, interval_seconds, cron, anchor_at, policy)
 DO UPDATE SET id = harvest.schedules.id
 RETURNING *;
@@ -48,7 +48,7 @@ ORDER BY id LIMIT sqlc.arg(page_size);
 UPDATE harvest.schedules
 SET capability = $2, request_schema = $3, execution_key = $4, params = $5, scope = $6, fingerprint = $7,
     interval_seconds = $8, cron = $9, anchor_at = $10, next_due_at = $11, policy = $12,
-    enabled = $13, revision = revision + 1
+    enabled = $13, execution_policy = sqlc.arg(execution_policy), revision = revision + 1
 WHERE id = $1
 RETURNING *;
 

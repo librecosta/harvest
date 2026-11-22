@@ -24,8 +24,8 @@ WHERE stream = $1 AND target_id = $2 AND capability = $3 AND output_schema = $4 
 -- name: InsertObservation :exec
 INSERT INTO harvest.observations
     (id,stream,target_id,capability,output_schema,scope_key,scope,state,observed_at,received_at,data,content_hash,
-    source,evidence,sample,job_id,attempt_id,stored_bytes)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18);
+    source,evidence,sample,job_id,attempt_id,stored_bytes,execution_egress_region)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,sqlc.narg(execution_egress_region));
 
 -- name: ObservationsByID :many
 SELECT * FROM harvest.observations WHERE id = ANY(sqlc.arg(ids)::uuid[]);

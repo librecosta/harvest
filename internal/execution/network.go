@@ -129,8 +129,6 @@ func resolveEgressRegion(rule egress.SourceConfig, route egress.RouteConfig, req
 	return region, !slices.ContainsFunc(route.Paths, func(path egress.PathConfig) bool { return path.Region != region })
 }
 
-func routeKey(offer, namespace, region string) string { return offer + "|" + namespace + "|" + region }
-
 func (e *Engine) dispatchOffers(ctx context.Context, db *q.Queries, p config.Principal, w q.HarvestWorker) ([]string, []string, error) {
 	paths, err := decodePaths(w.NetworkPaths)
 	if err != nil {
@@ -171,18 +169,23 @@ func (e *Engine) dispatchOffers(ctx context.Context, db *q.Queries, p config.Pri
 			if !slices.Contains(p.EgressProfiles, rule.Profile) {
 				continue
 			}
-			if _, ready := e.plan(p, rule, "", paths); ready {
-				network = append(network, routeKey(cap.Key(), rule.Namespace, ""))
-			}
 			route := e.route(rule.Profile)
-			for _, a := range paths {
-				key := routeKey(cap.Key(), rule.Namespace, a.Region)
-				if a.Region == "" || (rule.EgressRegion != "" && a.Region != rule.EgressRegion) ||
-					(a.State != "healthy" && a.State != "degraded") || slices.Contains(network, key) {
+			for _, mode := range []string{"", directFirst, egress.PreferProxy, egress.RequireProxy} {
+				if !allowedMode(route, cap.Network.AllowDirect, mode) {
 					continue
 				}
-				if _, eligible := routePath(route, a); eligible {
-					network = append(network, key)
+				if _, _, ready := e.taskNetwork(p, cap, rule, "", ExecutionPolicy{Mode: mode}, paths, nil); ready {
+					network = append(network, networkOffer(cap.Key(), rule.Namespace, "", mode))
+				}
+				for _, a := range paths {
+					path, matched := routePath(route, a)
+					if !matched || a.Region == "" || !pathReady(a) || !allowedTaskPath(rule, path, mode, cap.Network.AllowDirect) {
+						continue
+					}
+					key := networkOffer(cap.Key(), rule.Namespace, a.Region, mode)
+					if !slices.Contains(network, key) {
+						network = append(network, key)
+					}
 				}
 			}
 		}
@@ -224,17 +227,31 @@ func (e *Engine) networkWaiting(ctx context.Context, job q.HarvestJob, cap provi
 	if err := json.Unmarshal(job.Scope, &scope); err != nil {
 		return "", err
 	}
-	if rule.EgressRegion != "" && scope.EgressRegion != "" && scope.EgressRegion != rule.EgressRegion {
+	policy := executionPolicy(job.ExecutionPolicy)
+	route := e.route(rule.Profile)
+	if !allowedMode(route, cap.Network.AllowDirect, policy.Mode) {
+		return "schedule_egress_mode_not_allowed", nil
+	}
+	if len(policy.Regions) == 0 && rule.EgressRegion != "" && scope.EgressRegion != "" && scope.EgressRegion != rule.EgressRegion {
 		return "egress_region_conflict", nil
 	}
-	if _, allowed := resolveEgressRegion(rule, e.route(rule.Profile), scope.EgressRegion); !allowed {
+	if _, allowed := resolveEgressRegion(rule, route, scope.EgressRegion); len(policy.Regions) == 0 && !allowed {
 		return "egress_region_required", nil
+	}
+	if !slices.ContainsFunc(route.Paths, func(path egress.PathConfig) bool {
+		return taskAllowsRegion(rule, route, scope.EgressRegion, path.Region, policy) &&
+			allowedTaskPath(rule, path, policy.Mode, cap.Network.AllowDirect)
+	}) {
+		return "egress_region_conflict", nil
 	}
 	workers, err := e.queries.NetworkWorkers(ctx, q.NetworkWorkersParams{
 		Principals: e.workerPrincipals(job.Namespace, []string{job.Capability}), ExecutionKey: job.ExecutionKey,
 	})
 	if err != nil {
 		return "", err
+	}
+	if len(workers) == 0 {
+		return "no_matching_worker", nil
 	}
 	for _, w := range workers {
 		paths, err := decodePaths(w.NetworkPaths)
@@ -245,7 +262,7 @@ func (e *Engine) networkWaiting(ctx context.Context, job q.HarvestJob, cap provi
 			if p.Name != w.Principal {
 				continue
 			}
-			if _, ok := e.plan(p, rule, scope.EgressRegion, paths); ok {
+			if _, _, ok := e.taskNetwork(p, cap, rule, scope.EgressRegion, policy, paths, nil); ok {
 				return "awaiting_claim", nil
 			}
 		}

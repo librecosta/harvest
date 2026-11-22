@@ -25,6 +25,7 @@ type HarvestAttempt struct {
 	ReceiptState         *string     `json:"receipt_state"`
 	NetworkRevision      int64       `json:"network_revision"`
 	ResultObservationIds []uuid.UUID `json:"result_observation_ids"`
+	EgressRegion         *string     `json:"egress_region"`
 }
 
 type HarvestChangeEvent struct {
@@ -128,27 +129,29 @@ type HarvestJob struct {
 	AcceptedHash      []byte     `json:"accepted_hash"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
+	ExecutionPolicy   []byte     `json:"execution_policy"`
 }
 
 type HarvestObservation struct {
-	ID           uuid.UUID `json:"id"`
-	Stream       string    `json:"stream"`
-	TargetID     uuid.UUID `json:"target_id"`
-	Capability   string    `json:"capability"`
-	OutputSchema int32     `json:"output_schema"`
-	ScopeKey     string    `json:"scope_key"`
-	Scope        []byte    `json:"scope"`
-	State        string    `json:"state"`
-	ObservedAt   time.Time `json:"observed_at"`
-	ReceivedAt   time.Time `json:"received_at"`
-	Data         []byte    `json:"data"`
-	ContentHash  []byte    `json:"content_hash"`
-	Source       string    `json:"source"`
-	Evidence     string    `json:"evidence"`
-	Sample       bool      `json:"sample"`
-	JobID        uuid.UUID `json:"job_id"`
-	AttemptID    uuid.UUID `json:"attempt_id"`
-	StoredBytes  int32     `json:"stored_bytes"`
+	ID                    uuid.UUID `json:"id"`
+	Stream                string    `json:"stream"`
+	TargetID              uuid.UUID `json:"target_id"`
+	Capability            string    `json:"capability"`
+	OutputSchema          int32     `json:"output_schema"`
+	ScopeKey              string    `json:"scope_key"`
+	Scope                 []byte    `json:"scope"`
+	State                 string    `json:"state"`
+	ObservedAt            time.Time `json:"observed_at"`
+	ReceivedAt            time.Time `json:"received_at"`
+	Data                  []byte    `json:"data"`
+	ContentHash           []byte    `json:"content_hash"`
+	Source                string    `json:"source"`
+	Evidence              string    `json:"evidence"`
+	Sample                bool      `json:"sample"`
+	JobID                 uuid.UUID `json:"job_id"`
+	AttemptID             uuid.UUID `json:"attempt_id"`
+	StoredBytes           int32     `json:"stored_bytes"`
+	ExecutionEgressRegion *string   `json:"execution_egress_region"`
 }
 
 type HarvestOperationalPolicy struct {
@@ -216,6 +219,7 @@ type HarvestSchedule struct {
 	Revision        int64     `json:"revision"`
 	MissedCount     int32     `json:"missed_count"`
 	CreatedAt       time.Time `json:"created_at"`
+	ExecutionPolicy []byte    `json:"execution_policy"`
 }
 
 type HarvestSubmission struct {

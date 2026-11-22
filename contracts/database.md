@@ -28,11 +28,20 @@ Schedules lock their own row and commit slot insertion and phase advancement
 together. The slot unique constraint is scoped to Schedule and revision.
 
 Manual active-equivalent Jobs are coalesced within their canonical
-fingerprint and Run Now schedule lineage. The scoped submission table lets
+fingerprint and Run Now Schedule revision. The scoped submission table lets
 multiple request keys replay the same Job. Terminal Job and Attempt history
 is retained for 30 days and pruned in batches of 128. Expired history also
 releases its submission keys. Schedule phase and Target identity survive
 Job history expiry.
+
+Schedule execution overrides persist independently of the canonical request
+scope. Scheduled Jobs and Run Now snapshot the Schedule revision, route
+constraints and retry settings. Claim pins one eligible region for the
+Attempt, and permit approval rechecks that region against the existing
+routing policy. New Observations retain the Attempt region separately from
+their canonical scope and Steam store region. A Schedule edit leaves existing
+Jobs and their leases intact. Point-in-time Jobs keep a single attempt and
+their bounded sampling window.
 
 Permit issuance first locks the Job and verifies the Worker, Attempt and
 fencing generation. It locks applicable quota buckets in key order, then

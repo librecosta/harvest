@@ -36,18 +36,19 @@ type ResultIdentity struct {
 
 type ObservationView struct {
 	ResultIdentity
-	ID          uuid.UUID      `json:"id"`
-	Scope       jsontext.Value `json:"scope"`
-	State       string         `json:"state"`
-	ObservedAt  time.Time      `json:"observed_at"`
-	ReceivedAt  time.Time      `json:"received_at"`
-	Data        jsontext.Value `json:"data,omitzero"`
-	ContentHash string         `json:"content_hash,omitempty"`
-	Source      string         `json:"source"`
-	Evidence    string         `json:"evidence,omitempty"`
-	Sample      bool           `json:"sample"`
-	JobID       uuid.UUID      `json:"job_id"`
-	AttemptID   uuid.UUID      `json:"attempt_id"`
+	ID                    uuid.UUID      `json:"id"`
+	Scope                 jsontext.Value `json:"scope"`
+	State                 string         `json:"state"`
+	ObservedAt            time.Time      `json:"observed_at"`
+	ReceivedAt            time.Time      `json:"received_at"`
+	Data                  jsontext.Value `json:"data,omitzero"`
+	ContentHash           string         `json:"content_hash,omitempty"`
+	Source                string         `json:"source"`
+	Evidence              string         `json:"evidence,omitempty"`
+	Sample                bool           `json:"sample"`
+	JobID                 uuid.UUID      `json:"job_id"`
+	AttemptID             uuid.UUID      `json:"attempt_id"`
+	ExecutionEgressRegion *string        `json:"execution_egress_region,omitempty"`
 }
 
 func observationView(o q.HarvestObservation) ObservationView {
@@ -56,6 +57,7 @@ func observationView(o q.HarvestObservation) ObservationView {
 		ID:             o.ID, Scope: o.Scope, State: o.State, ObservedAt: o.ObservedAt.UTC(), ReceivedAt: o.ReceivedAt.UTC(),
 		Data: o.Data, ContentHash: hex.EncodeToString(o.ContentHash), Source: o.Source, Evidence: o.Evidence,
 		Sample: o.Sample, JobID: o.JobID, AttemptID: o.AttemptID,
+		ExecutionEgressRegion: o.ExecutionEgressRegion,
 	}
 }
 

@@ -25,6 +25,8 @@ func registerURLs(consumer, worker fiber.Router, h *handlers.API, ready func(con
 	consumer.Get("/schedules", h.Schedules)
 	consumer.Get("/schedules/:id", h.Schedule)
 	consumer.Get("/schedules/:id/jobs", h.ScheduleJobs)
+	consumer.Get("/schedules/:id/execution-policy", h.SchedulePolicy)
+	consumer.Post("/schedules/:id/execution-policy/preview", write, h.PreviewSchedulePolicy())
 	consumer.Post("/schedules", write, h.CreateSchedule())
 	consumer.Patch("/schedules/:id", write, h.EditSchedule())
 	consumer.Get("/jobs", h.Jobs)

@@ -54,6 +54,7 @@ type Plan struct {
 	Profile     string          `json:"profile"`
 	Mode        string          `json:"mode"`
 	AllowDirect bool            `json:"allow_direct,omitempty"`
+	DirectFirst bool            `json:"direct_first,omitempty"`
 	Paths       []Advertisement `json:"paths"`
 }
 

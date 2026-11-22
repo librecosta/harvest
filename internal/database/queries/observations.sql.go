@@ -13,7 +13,7 @@ import (
 )
 
 const attemptResultObservations = `-- name: AttemptResultObservations :many
-SELECT o.id, o.stream, o.target_id, o.capability, o.output_schema, o.scope_key, o.scope, o.state, o.observed_at, o.received_at, o.data, o.content_hash, o.source, o.evidence, o.sample, o.job_id, o.attempt_id, o.stored_bytes FROM harvest.attempts a JOIN harvest.observations o ON o.id=ANY(a.result_observation_ids)
+SELECT o.id, o.stream, o.target_id, o.capability, o.output_schema, o.scope_key, o.scope, o.state, o.observed_at, o.received_at, o.data, o.content_hash, o.source, o.evidence, o.sample, o.job_id, o.attempt_id, o.stored_bytes, o.execution_egress_region FROM harvest.attempts a JOIN harvest.observations o ON o.id=ANY(a.result_observation_ids)
 WHERE a.id=$1 AND a.job_id=$2 AND o.stream=$3
  AND o.target_id=$4 AND o.capability=$5
 ORDER BY o.scope_key
@@ -61,6 +61,7 @@ func (q *Queries) AttemptResultObservations(ctx context.Context, arg AttemptResu
 			&i.JobID,
 			&i.AttemptID,
 			&i.StoredBytes,
+			&i.ExecutionEgressRegion,
 		); err != nil {
 			return nil, err
 		}
@@ -226,29 +227,30 @@ func (q *Queries) DeleteCurrentResult(ctx context.Context, arg DeleteCurrentResu
 const insertObservation = `-- name: InsertObservation :exec
 INSERT INTO harvest.observations
     (id,stream,target_id,capability,output_schema,scope_key,scope,state,observed_at,received_at,data,content_hash,
-    source,evidence,sample,job_id,attempt_id,stored_bytes)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+    source,evidence,sample,job_id,attempt_id,stored_bytes,execution_egress_region)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
 `
 
 type InsertObservationParams struct {
-	ID           uuid.UUID `json:"id"`
-	Stream       string    `json:"stream"`
-	TargetID     uuid.UUID `json:"target_id"`
-	Capability   string    `json:"capability"`
-	OutputSchema int32     `json:"output_schema"`
-	ScopeKey     string    `json:"scope_key"`
-	Scope        []byte    `json:"scope"`
-	State        string    `json:"state"`
-	ObservedAt   time.Time `json:"observed_at"`
-	ReceivedAt   time.Time `json:"received_at"`
-	Data         []byte    `json:"data"`
-	ContentHash  []byte    `json:"content_hash"`
-	Source       string    `json:"source"`
-	Evidence     string    `json:"evidence"`
-	Sample       bool      `json:"sample"`
-	JobID        uuid.UUID `json:"job_id"`
-	AttemptID    uuid.UUID `json:"attempt_id"`
-	StoredBytes  int32     `json:"stored_bytes"`
+	ID                    uuid.UUID `json:"id"`
+	Stream                string    `json:"stream"`
+	TargetID              uuid.UUID `json:"target_id"`
+	Capability            string    `json:"capability"`
+	OutputSchema          int32     `json:"output_schema"`
+	ScopeKey              string    `json:"scope_key"`
+	Scope                 []byte    `json:"scope"`
+	State                 string    `json:"state"`
+	ObservedAt            time.Time `json:"observed_at"`
+	ReceivedAt            time.Time `json:"received_at"`
+	Data                  []byte    `json:"data"`
+	ContentHash           []byte    `json:"content_hash"`
+	Source                string    `json:"source"`
+	Evidence              string    `json:"evidence"`
+	Sample                bool      `json:"sample"`
+	JobID                 uuid.UUID `json:"job_id"`
+	AttemptID             uuid.UUID `json:"attempt_id"`
+	StoredBytes           int32     `json:"stored_bytes"`
+	ExecutionEgressRegion *string   `json:"execution_egress_region"`
 }
 
 func (q *Queries) InsertObservation(ctx context.Context, arg InsertObservationParams) error {
@@ -271,6 +273,7 @@ func (q *Queries) InsertObservation(ctx context.Context, arg InsertObservationPa
 		arg.JobID,
 		arg.AttemptID,
 		arg.StoredBytes,
+		arg.ExecutionEgressRegion,
 	)
 	return err
 }
@@ -384,7 +387,7 @@ func (q *Queries) ObservationHistoryPage(ctx context.Context, arg ObservationHis
 }
 
 const observationsByID = `-- name: ObservationsByID :many
-SELECT id, stream, target_id, capability, output_schema, scope_key, scope, state, observed_at, received_at, data, content_hash, source, evidence, sample, job_id, attempt_id, stored_bytes FROM harvest.observations WHERE id = ANY($1::uuid[])
+SELECT id, stream, target_id, capability, output_schema, scope_key, scope, state, observed_at, received_at, data, content_hash, source, evidence, sample, job_id, attempt_id, stored_bytes, execution_egress_region FROM harvest.observations WHERE id = ANY($1::uuid[])
 `
 
 func (q *Queries) ObservationsByID(ctx context.Context, ids []uuid.UUID) ([]HarvestObservation, error) {
@@ -415,6 +418,7 @@ func (q *Queries) ObservationsByID(ctx context.Context, ids []uuid.UUID) ([]Harv
 			&i.JobID,
 			&i.AttemptID,
 			&i.StoredBytes,
+			&i.ExecutionEgressRegion,
 		); err != nil {
 			return nil, err
 		}

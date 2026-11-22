@@ -232,7 +232,9 @@ func (p *Pool) reserve(plan Plan, source Source, namespace, capability, pinned s
 			selected, path = e, candidate
 		}
 	}
-	if selected == nil {
+	if plan.DirectFirst && direct != nil {
+		selected, path = nil, *direct
+	} else if selected == nil {
 		if busy {
 			return reservation{}, ErrDeferred
 		}

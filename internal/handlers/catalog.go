@@ -69,14 +69,15 @@ func (a *API) EditTarget() fiber.Handler {
 }
 
 type scheduleView struct {
-	ID         uuid.UUID            `json:"id"`
-	Namespace  string               `json:"namespace"`
-	Request    execution.Request    `json:"request"`
-	Recurrence execution.Recurrence `json:"recurrence"`
-	NextDueAt  time.Time            `json:"next_due_at"`
-	Enabled    bool                 `json:"enabled"`
-	Revision   int64                `json:"revision"`
-	Missed     int32                `json:"missed_count"`
+	ID              uuid.UUID                 `json:"id"`
+	Namespace       string                    `json:"namespace"`
+	Request         execution.Request         `json:"request"`
+	Recurrence      execution.Recurrence      `json:"recurrence"`
+	NextDueAt       time.Time                 `json:"next_due_at"`
+	Enabled         bool                      `json:"enabled"`
+	Revision        int64                     `json:"revision"`
+	Missed          int32                     `json:"missed_count"`
+	ExecutionPolicy execution.ExecutionPolicy `json:"execution_policy"`
 }
 
 func requestView(id uuid.UUID, capability string, version int32, params, scope []byte) execution.Request {
@@ -87,11 +88,32 @@ func requestView(id uuid.UUID, capability string, version int32, params, scope [
 }
 
 func showSchedule(s q.HarvestSchedule) scheduleView {
+	var policy execution.ExecutionPolicy
+	_ = json.Unmarshal(s.ExecutionPolicy, &policy)
 	return scheduleView{
 		ID: s.ID, Namespace: s.Namespace, Request: requestView(s.TargetID, s.Capability, s.RequestSchema, s.Params, s.Scope),
 		Recurrence: execution.Recurrence{IntervalSeconds: s.IntervalSeconds, Cron: s.Cron, AnchorAt: s.AnchorAt, Policy: s.Policy},
-		NextDueAt:  s.NextDueAt, Enabled: s.Enabled, Revision: s.Revision, Missed: s.MissedCount,
+		NextDueAt:  s.NextDueAt, Enabled: s.Enabled, Revision: s.Revision, Missed: s.MissedCount, ExecutionPolicy: policy,
 	}
+}
+
+func (a *API) SchedulePolicy(c fiber.Ctx) error {
+	id, err := pathID(c)
+	if err != nil {
+		return a.respond(c, 200, nil, err)
+	}
+	out, err := a.engine.ScheduleExecutionPolicy(c.Context(), request(c).principal, id, nil)
+	return a.respond(c, 200, out, err)
+}
+
+func (a *API) PreviewSchedulePolicy() fiber.Handler {
+	return action(a, 200, func(c fiber.Ctx, p config.Principal, input execution.SchedulePolicyPreview) (any, error) {
+		id, err := pathID(c)
+		if err != nil {
+			return nil, err
+		}
+		return a.engine.ScheduleExecutionPolicy(c.Context(), p, id, &input)
+	})
 }
 
 func (a *API) Schedules(c fiber.Ctx) error {

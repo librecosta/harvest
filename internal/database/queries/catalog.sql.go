@@ -42,11 +42,11 @@ func (q *Queries) DBNow(ctx context.Context) (time.Time, error) {
 const insertSchedule = `-- name: InsertSchedule :one
 INSERT INTO harvest.schedules
     (id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint,
-     interval_seconds, cron, anchor_at, next_due_at, policy, enabled)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+     interval_seconds, cron, anchor_at, next_due_at, policy, enabled, execution_policy)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 ON CONFLICT (fingerprint, interval_seconds, cron, anchor_at, policy)
 DO UPDATE SET id = harvest.schedules.id
-RETURNING id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, interval_seconds, cron, anchor_at, next_due_at, policy, enabled, revision, missed_count, created_at
+RETURNING id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, interval_seconds, cron, anchor_at, next_due_at, policy, enabled, revision, missed_count, created_at, execution_policy
 `
 
 type InsertScheduleParams struct {
@@ -65,6 +65,7 @@ type InsertScheduleParams struct {
 	NextDueAt       time.Time `json:"next_due_at"`
 	Policy          string    `json:"policy"`
 	Enabled         bool      `json:"enabled"`
+	ExecutionPolicy []byte    `json:"execution_policy"`
 }
 
 func (q *Queries) InsertSchedule(ctx context.Context, arg InsertScheduleParams) (HarvestSchedule, error) {
@@ -84,6 +85,7 @@ func (q *Queries) InsertSchedule(ctx context.Context, arg InsertScheduleParams) 
 		arg.NextDueAt,
 		arg.Policy,
 		arg.Enabled,
+		arg.ExecutionPolicy,
 	)
 	var i HarvestSchedule
 	err := row.Scan(
@@ -105,12 +107,13 @@ func (q *Queries) InsertSchedule(ctx context.Context, arg InsertScheduleParams) 
 		&i.Revision,
 		&i.MissedCount,
 		&i.CreatedAt,
+		&i.ExecutionPolicy,
 	)
 	return i, err
 }
 
 const listSchedules = `-- name: ListSchedules :many
-SELECT id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, interval_seconds, cron, anchor_at, next_due_at, policy, enabled, revision, missed_count, created_at FROM harvest.schedules
+SELECT id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, interval_seconds, cron, anchor_at, next_due_at, policy, enabled, revision, missed_count, created_at, execution_policy FROM harvest.schedules
 WHERE namespace = $1 AND id > $2::uuid
   AND (coalesce(cardinality($3::text[]), 0) = 0 OR capability = ANY($3::text[]))
 ORDER BY id LIMIT $4
@@ -156,6 +159,7 @@ func (q *Queries) ListSchedules(ctx context.Context, arg ListSchedulesParams) ([
 			&i.Revision,
 			&i.MissedCount,
 			&i.CreatedAt,
+			&i.ExecutionPolicy,
 		); err != nil {
 			return nil, err
 		}
@@ -208,7 +212,7 @@ func (q *Queries) ListTargets(ctx context.Context, arg ListTargetsParams) ([]Har
 }
 
 const lockDueSchedule = `-- name: LockDueSchedule :one
-SELECT s.id, s.target_id, s.namespace, s.capability, s.request_schema, s.execution_key, s.params, s.scope, s.fingerprint, s.interval_seconds, s.cron, s.anchor_at, s.next_due_at, s.policy, s.enabled, s.revision, s.missed_count, s.created_at FROM harvest.schedules s
+SELECT s.id, s.target_id, s.namespace, s.capability, s.request_schema, s.execution_key, s.params, s.scope, s.fingerprint, s.interval_seconds, s.cron, s.anchor_at, s.next_due_at, s.policy, s.enabled, s.revision, s.missed_count, s.created_at, s.execution_policy FROM harvest.schedules s
 JOIN harvest.targets t ON t.id = s.target_id
 WHERE s.enabled AND s.next_due_at <= statement_timestamp() AND t.state = 'active'
   AND s.execution_key = ANY($1::text[])
@@ -237,12 +241,13 @@ func (q *Queries) LockDueSchedule(ctx context.Context, offers []string) (Harvest
 		&i.Revision,
 		&i.MissedCount,
 		&i.CreatedAt,
+		&i.ExecutionPolicy,
 	)
 	return i, err
 }
 
 const lockSchedule = `-- name: LockSchedule :one
-SELECT id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, interval_seconds, cron, anchor_at, next_due_at, policy, enabled, revision, missed_count, created_at FROM harvest.schedules WHERE id = $1 AND namespace = ANY($2::text[]) FOR UPDATE
+SELECT id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, interval_seconds, cron, anchor_at, next_due_at, policy, enabled, revision, missed_count, created_at, execution_policy FROM harvest.schedules WHERE id = $1 AND namespace = ANY($2::text[]) FOR UPDATE
 `
 
 type LockScheduleParams struct {
@@ -272,6 +277,7 @@ func (q *Queries) LockSchedule(ctx context.Context, arg LockScheduleParams) (Har
 		&i.Revision,
 		&i.MissedCount,
 		&i.CreatedAt,
+		&i.ExecutionPolicy,
 	)
 	return i, err
 }
@@ -302,7 +308,7 @@ func (q *Queries) LockTarget(ctx context.Context, arg LockTargetParams) (Harvest
 }
 
 const schedule = `-- name: Schedule :one
-SELECT id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, interval_seconds, cron, anchor_at, next_due_at, policy, enabled, revision, missed_count, created_at FROM harvest.schedules WHERE id = $1 AND namespace = ANY($2::text[])
+SELECT id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, interval_seconds, cron, anchor_at, next_due_at, policy, enabled, revision, missed_count, created_at, execution_policy FROM harvest.schedules WHERE id = $1 AND namespace = ANY($2::text[])
 `
 
 type ScheduleParams struct {
@@ -332,6 +338,7 @@ func (q *Queries) Schedule(ctx context.Context, arg ScheduleParams) (HarvestSche
 		&i.Revision,
 		&i.MissedCount,
 		&i.CreatedAt,
+		&i.ExecutionPolicy,
 	)
 	return i, err
 }
@@ -365,9 +372,9 @@ const updateSchedule = `-- name: UpdateSchedule :one
 UPDATE harvest.schedules
 SET capability = $2, request_schema = $3, execution_key = $4, params = $5, scope = $6, fingerprint = $7,
     interval_seconds = $8, cron = $9, anchor_at = $10, next_due_at = $11, policy = $12,
-    enabled = $13, revision = revision + 1
+    enabled = $13, execution_policy = $14, revision = revision + 1
 WHERE id = $1
-RETURNING id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, interval_seconds, cron, anchor_at, next_due_at, policy, enabled, revision, missed_count, created_at
+RETURNING id, target_id, namespace, capability, request_schema, execution_key, params, scope, fingerprint, interval_seconds, cron, anchor_at, next_due_at, policy, enabled, revision, missed_count, created_at, execution_policy
 `
 
 type UpdateScheduleParams struct {
@@ -384,6 +391,7 @@ type UpdateScheduleParams struct {
 	NextDueAt       time.Time `json:"next_due_at"`
 	Policy          string    `json:"policy"`
 	Enabled         bool      `json:"enabled"`
+	ExecutionPolicy []byte    `json:"execution_policy"`
 }
 
 func (q *Queries) UpdateSchedule(ctx context.Context, arg UpdateScheduleParams) (HarvestSchedule, error) {
@@ -401,6 +409,7 @@ func (q *Queries) UpdateSchedule(ctx context.Context, arg UpdateScheduleParams) 
 		arg.NextDueAt,
 		arg.Policy,
 		arg.Enabled,
+		arg.ExecutionPolicy,
 	)
 	var i HarvestSchedule
 	err := row.Scan(
@@ -422,6 +431,7 @@ func (q *Queries) UpdateSchedule(ctx context.Context, arg UpdateScheduleParams) 
 		&i.Revision,
 		&i.MissedCount,
 		&i.CreatedAt,
+		&i.ExecutionPolicy,
 	)
 	return i, err
 }

@@ -57,21 +57,24 @@ type Recurrence struct {
 }
 
 type ScheduleInput struct {
-	Request    Request    `json:"request"`
-	Recurrence Recurrence `json:"recurrence"`
-	Enabled    *bool      `json:"enabled,omitempty"`
+	Request         Request         `json:"request"`
+	Recurrence      Recurrence      `json:"recurrence"`
+	Enabled         *bool           `json:"enabled,omitempty"`
+	ExecutionPolicy ExecutionPolicy `json:"execution_policy,omitzero"`
 }
 
 type SchedulePatch struct {
-	Revision   int64       `json:"revision"`
-	Request    *Request    `json:"request,omitempty"`
-	Recurrence *Recurrence `json:"recurrence,omitempty"`
-	Enabled    *bool       `json:"enabled,omitempty"`
+	Revision        int64            `json:"revision"`
+	Request         *Request         `json:"request,omitempty"`
+	Recurrence      *Recurrence      `json:"recurrence,omitempty"`
+	Enabled         *bool            `json:"enabled,omitempty"`
+	ExecutionPolicy *ExecutionPolicy `json:"execution_policy,omitempty"`
 }
 
 type Submit struct {
-	Request    *Request   `json:"request,omitempty"`
-	ScheduleID *uuid.UUID `json:"schedule_id,omitempty"`
+	Request                  *Request   `json:"request,omitempty"`
+	ScheduleID               *uuid.UUID `json:"schedule_id,omitempty"`
+	ExpectedScheduleRevision int64      `json:"expected_schedule_revision,omitempty"`
 }
 
 type Registration struct {
