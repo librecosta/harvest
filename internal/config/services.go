@@ -24,6 +24,7 @@ type Principal struct {
 }
 
 type Worker struct {
+	NodeID             string           `mapstructure:"node_id"`
 	SteamCatalogAPIKey string           `mapstructure:"steam_catalog_api_key"`
 	ControlURL         string           `mapstructure:"control_url"`
 	Token              string           `mapstructure:"token"`
@@ -42,6 +43,9 @@ func LoadWorker(path string) (Worker, error) {
 }
 
 func validateWorker(w Worker) error {
+	if w.NodeID != "" && !ValidWorkerNodeID(w.NodeID) {
+		return errors.New("invalid worker node_id")
+	}
 	u, err := url.Parse(w.ControlURL)
 	if err != nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" ||
 		u.ForceQuery || strings.HasSuffix(u.Host, ":") || strings.Contains(w.ControlURL, "#") || (u.Path != "" && u.Path != "/") {
@@ -82,6 +86,9 @@ func validSteamCatalogKey(key string) bool {
 }
 
 var serviceName = regexp.MustCompile("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
+var workerNodeID = regexp.MustCompile("^[a-z0-9][a-z0-9_-]{0,63}$")
+
+func ValidWorkerNodeID(id string) bool { return workerNodeID.MatchString(id) }
 
 // PrivateControlHost checks literal addresses before sending worker credentials.
 func PrivateControlHost(host string) bool {

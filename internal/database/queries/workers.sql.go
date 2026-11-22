@@ -84,6 +84,7 @@ func (q *Queries) AttemptForGeneration(ctx context.Context, arg AttemptForGenera
 const countCollectionWorkers = `-- name: CountCollectionWorkers :one
 SELECT count(*) FROM harvest.workers
 WHERE principal=ANY($1::text[]) AND NOT draining
+ AND (node_id IS NULL OR EXISTS (SELECT 1 FROM harvest.worker_nodes n WHERE n.current_worker_id = workers.id AND n.desired_state = 'active'))
  AND last_seen>=statement_timestamp()-interval '30 seconds'
 `
 
@@ -98,6 +99,7 @@ const eligibleWorker = `-- name: EligibleWorker :one
 SELECT EXISTS (
     SELECT 1 FROM harvest.workers
     WHERE principal = ANY($1::text[]) AND NOT draining
+      AND (node_id IS NULL OR EXISTS (SELECT 1 FROM harvest.worker_nodes n WHERE n.current_worker_id = workers.id AND n.desired_state = 'active'))
       AND last_seen > statement_timestamp() - interval '30 seconds'
       AND $2::text = ANY(offers)
 )
@@ -144,7 +146,7 @@ func (q *Queries) FinishAttempt(ctx context.Context, arg FinishAttemptParams) er
 const heartbeatWorker = `-- name: HeartbeatWorker :one
 UPDATE harvest.workers SET last_seen = clock_timestamp(), draining = draining OR $3::boolean,
     network_paths = coalesce($4::jsonb, network_paths)
-WHERE id = $1 AND principal = $2 RETURNING id, principal, offers, egress_profiles, capacity, last_seen, draining, network_paths
+WHERE id = $1 AND principal = $2 RETURNING id, principal, offers, egress_profiles, capacity, last_seen, draining, network_paths, node_id
 `
 
 type HeartbeatWorkerParams struct {
@@ -171,6 +173,7 @@ func (q *Queries) HeartbeatWorker(ctx context.Context, arg HeartbeatWorkerParams
 		&i.LastSeen,
 		&i.Draining,
 		&i.NetworkPaths,
+		&i.NodeID,
 	)
 	return i, err
 }
@@ -222,8 +225,8 @@ func (q *Queries) InsertAttempt(ctx context.Context, arg InsertAttemptParams) (H
 }
 
 const insertWorker = `-- name: InsertWorker :exec
-INSERT INTO harvest.workers (id, principal, offers, egress_profiles, capacity, network_paths)
-VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (id) DO NOTHING
+INSERT INTO harvest.workers (id, principal, offers, egress_profiles, capacity, network_paths, node_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (id) DO NOTHING
 `
 
 type InsertWorkerParams struct {
@@ -233,6 +236,7 @@ type InsertWorkerParams struct {
 	EgressProfiles []string  `json:"egress_profiles"`
 	Capacity       int32     `json:"capacity"`
 	NetworkPaths   []byte    `json:"network_paths"`
+	NodeID         *string   `json:"node_id"`
 }
 
 func (q *Queries) InsertWorker(ctx context.Context, arg InsertWorkerParams) error {
@@ -243,6 +247,7 @@ func (q *Queries) InsertWorker(ctx context.Context, arg InsertWorkerParams) erro
 		arg.EgressProfiles,
 		arg.Capacity,
 		arg.NetworkPaths,
+		arg.NodeID,
 	)
 	return err
 }
@@ -287,7 +292,7 @@ func (q *Queries) JobAttempts(ctx context.Context, jobID uuid.UUID) ([]HarvestAt
 }
 
 const lockWorker = `-- name: LockWorker :one
-SELECT id, principal, offers, egress_profiles, capacity, last_seen, draining, network_paths FROM harvest.workers WHERE id = $1 AND principal = $2 FOR UPDATE
+SELECT id, principal, offers, egress_profiles, capacity, last_seen, draining, network_paths, node_id FROM harvest.workers WHERE id = $1 AND principal = $2 FOR UPDATE
 `
 
 type LockWorkerParams struct {
@@ -307,12 +312,14 @@ func (q *Queries) LockWorker(ctx context.Context, arg LockWorkerParams) (Harvest
 		&i.LastSeen,
 		&i.Draining,
 		&i.NetworkPaths,
+		&i.NodeID,
 	)
 	return i, err
 }
 
 const networkWorkers = `-- name: NetworkWorkers :many
-SELECT id, principal, offers, egress_profiles, capacity, last_seen, draining, network_paths FROM harvest.workers WHERE principal = ANY($1::text[]) AND NOT draining
+SELECT id, principal, offers, egress_profiles, capacity, last_seen, draining, network_paths, node_id FROM harvest.workers WHERE principal = ANY($1::text[]) AND NOT draining
+  AND (node_id IS NULL OR EXISTS (SELECT 1 FROM harvest.worker_nodes n WHERE n.current_worker_id = workers.id AND n.desired_state = 'active'))
   AND last_seen > statement_timestamp() - interval '30 seconds'
   AND $2::text = ANY(offers)
 ORDER BY last_seen DESC LIMIT 100
@@ -341,6 +348,7 @@ func (q *Queries) NetworkWorkers(ctx context.Context, arg NetworkWorkersParams) 
 			&i.LastSeen,
 			&i.Draining,
 			&i.NetworkPaths,
+			&i.NodeID,
 		); err != nil {
 			return nil, err
 		}
@@ -355,7 +363,7 @@ func (q *Queries) NetworkWorkers(ctx context.Context, arg NetworkWorkersParams) 
 const pruneWorkers = `-- name: PruneWorkers :exec
 DELETE FROM harvest.workers WHERE id IN (
     SELECT w.id FROM harvest.workers w
-    WHERE w.last_seen < statement_timestamp() - interval '30 days'
+    WHERE w.node_id IS NULL AND w.last_seen < statement_timestamp() - interval '30 days'
       AND NOT EXISTS (SELECT 1 FROM harvest.attempts a WHERE a.worker_id = w.id)
     ORDER BY w.last_seen, w.id LIMIT 128 FOR UPDATE SKIP LOCKED
 )
@@ -399,7 +407,7 @@ func (q *Queries) RenewAttempt(ctx context.Context, arg RenewAttemptParams) (Har
 }
 
 const worker = `-- name: Worker :one
-SELECT id, principal, offers, egress_profiles, capacity, last_seen, draining, network_paths FROM harvest.workers WHERE id = $1 AND principal = $2
+SELECT id, principal, offers, egress_profiles, capacity, last_seen, draining, network_paths, node_id FROM harvest.workers WHERE id = $1 AND principal = $2
 `
 
 type WorkerParams struct {
@@ -419,6 +427,7 @@ func (q *Queries) Worker(ctx context.Context, arg WorkerParams) (HarvestWorker, 
 		&i.LastSeen,
 		&i.Draining,
 		&i.NetworkPaths,
+		&i.NodeID,
 	)
 	return i, err
 }

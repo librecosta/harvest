@@ -229,4 +229,28 @@ type HarvestWorker struct {
 	LastSeen       time.Time `json:"last_seen"`
 	Draining       bool      `json:"draining"`
 	NetworkPaths   []byte    `json:"network_paths"`
+	NodeID         *string   `json:"node_id"`
+}
+
+type HarvestWorkerNode struct {
+	NodeID          string    `json:"node_id"`
+	Principal       string    `json:"principal"`
+	Namespaces      []string  `json:"namespaces"`
+	Capabilities    []string  `json:"capabilities"`
+	CurrentWorkerID uuid.UUID `json:"current_worker_id"`
+	DesiredState    string    `json:"desired_state"`
+	Revision        int64     `json:"revision"`
+}
+
+type HarvestWorkerNodeAction struct {
+	RequestID     uuid.UUID  `json:"request_id"`
+	NodeID        string     `json:"node_id"`
+	Principal     string     `json:"principal"`
+	ActorID       *uuid.UUID `json:"actor_id"`
+	ActorName     string     `json:"actor_name"`
+	ActorRole     string     `json:"actor_role"`
+	PreviousState string     `json:"previous_state"`
+	DesiredState  string     `json:"desired_state"`
+	Revision      int64      `json:"revision"`
+	DecidedAt     time.Time  `json:"decided_at"`
 }

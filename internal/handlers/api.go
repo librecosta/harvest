@@ -127,7 +127,7 @@ func (a *API) respond(c fiber.Ctx, status int, value any, err error) error {
 		errors.Is(err, egress.ErrBootstrapRequired), errors.Is(err, egress.ErrBootstrapReady),
 		errors.Is(err, egress.ErrBootstrapUnavailable), errors.Is(err, egress.ErrRegistryMissing):
 		return problem(c, 409, err.Error(), info.id)
-	case errors.Is(err, execution.ErrUnsupported), errors.Is(err, execution.ErrFence),
+	case errors.Is(err, execution.ErrUnsupported), errors.Is(err, execution.ErrFence), errors.Is(err, execution.ErrWorkerNodeBusy),
 		errors.Is(err, execution.ErrCancelled), errors.Is(err, execution.ErrConflict), errors.Is(err, execution.ErrTerminal), errors.Is(err, execution.ErrQuotaBudget), errors.Is(err, execution.ErrEgressUnavailable):
 		return problem(c, 409, err.Error(), info.id)
 	case errors.As(err, &pgErr) && pgErr.Code == "23505":

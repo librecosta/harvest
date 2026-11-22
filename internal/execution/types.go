@@ -15,6 +15,7 @@ var (
 	ErrForbidden         = errors.New("forbidden")
 	ErrNotFound          = errors.New("not_found")
 	ErrConflict          = errors.New("conflict")
+	ErrWorkerNodeBusy    = errors.New("worker_node_busy")
 	ErrUnsupported       = errors.New("capability_unavailable")
 	ErrDraining          = errors.New("draining")
 	ErrFence             = errors.New("lease_lost")
@@ -74,6 +75,7 @@ type Submit struct {
 }
 
 type Registration struct {
+	NodeID         string                 `json:"node_id,omitempty"`
 	ID             uuid.UUID              `json:"id"`
 	Offers         []provider.Offer       `json:"offers"`
 	EgressProfiles []string               `json:"egress_profiles,omitempty"`
@@ -82,8 +84,9 @@ type Registration struct {
 }
 
 type Heartbeat struct {
-	Draining bool                   `json:"draining"`
-	Paths    []egress.Advertisement `json:"paths,omitempty"`
+	DesiredState string                 `json:"desired_state,omitempty"`
+	Draining     bool                   `json:"draining"`
+	Paths        []egress.Advertisement `json:"paths,omitempty"`
 }
 
 type Claim struct {

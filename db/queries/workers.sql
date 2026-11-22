@@ -1,6 +1,6 @@
 -- name: InsertWorker :exec
-INSERT INTO harvest.workers (id, principal, offers, egress_profiles, capacity, network_paths)
-VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (id) DO NOTHING;
+INSERT INTO harvest.workers (id, principal, offers, egress_profiles, capacity, network_paths, node_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (id) DO NOTHING;
 
 -- name: Worker :one
 SELECT * FROM harvest.workers WHERE id = $1 AND principal = $2;
@@ -46,13 +46,14 @@ ORDER BY last_seen DESC, id LIMIT 100;
 -- name: PruneWorkers :exec
 DELETE FROM harvest.workers WHERE id IN (
     SELECT w.id FROM harvest.workers w
-    WHERE w.last_seen < statement_timestamp() - interval '30 days'
+    WHERE w.node_id IS NULL AND w.last_seen < statement_timestamp() - interval '30 days'
       AND NOT EXISTS (SELECT 1 FROM harvest.attempts a WHERE a.worker_id = w.id)
     ORDER BY w.last_seen, w.id LIMIT 128 FOR UPDATE SKIP LOCKED
 );
 
 -- name: NetworkWorkers :many
 SELECT * FROM harvest.workers WHERE principal = ANY(sqlc.arg(principals)::text[]) AND NOT draining
+  AND (node_id IS NULL OR EXISTS (SELECT 1 FROM harvest.worker_nodes n WHERE n.current_worker_id = workers.id AND n.desired_state = 'active'))
   AND last_seen > statement_timestamp() - interval '30 seconds'
   AND sqlc.arg(execution_key)::text = ANY(offers)
 ORDER BY last_seen DESC LIMIT 100;
@@ -61,6 +62,7 @@ ORDER BY last_seen DESC LIMIT 100;
 SELECT EXISTS (
     SELECT 1 FROM harvest.workers
     WHERE principal = ANY(sqlc.arg(principals)::text[]) AND NOT draining
+      AND (node_id IS NULL OR EXISTS (SELECT 1 FROM harvest.worker_nodes n WHERE n.current_worker_id = workers.id AND n.desired_state = 'active'))
       AND last_seen > statement_timestamp() - interval '30 seconds'
       AND sqlc.arg(execution_key)::text = ANY(offers)
 );
@@ -68,4 +70,5 @@ SELECT EXISTS (
 -- name: CountCollectionWorkers :one
 SELECT count(*) FROM harvest.workers
 WHERE principal=ANY(sqlc.arg(principals)::text[]) AND NOT draining
+ AND (node_id IS NULL OR EXISTS (SELECT 1 FROM harvest.worker_nodes n WHERE n.current_worker_id = workers.id AND n.desired_state = 'active'))
  AND last_seen>=statement_timestamp()-interval '30 seconds';

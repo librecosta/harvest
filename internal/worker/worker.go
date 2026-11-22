@@ -41,7 +41,8 @@ func Run(ctx context.Context, cfg config.Worker, registry *provider.Registry, lo
 	pool.Probe(ctx)
 	api := newClient(cfg)
 	defer api.http.CloseIdleConnections()
-	reg := execution.Registration{ID: uuid.NewV7(), Offers: cfg.Offers, Capacity: cfg.Concurrency, EgressProfiles: cfg.EgressProfiles, Paths: pool.Advertise(cfg.Concurrency)}
+	reg := execution.Registration{ID: uuid.NewV7(), NodeID: cfg.NodeID, Offers: cfg.Offers, Capacity: cfg.Concurrency, EgressProfiles: cfg.EgressProfiles, Paths: pool.Advertise(cfg.Concurrency)}
+	waitingForNode := false
 	for {
 		_, err := api.request(ctx, http.MethodPost, "/workers/register", reg, nil)
 		if ctx.Err() != nil {
@@ -50,33 +51,45 @@ func Run(ctx context.Context, cfg config.Worker, registry *provider.Registry, lo
 		if err == nil {
 			break
 		}
-		if !transient(err) {
+		if responseCode(err, "worker_node_busy") {
+			if !waitingForNode {
+				logger.Info("waiting for previous worker runtime to release node", "node_id", cfg.NodeID)
+				waitingForNode = true
+			}
+		} else if !transient(err) {
 			return err
 		}
 		wait(ctx, 2*time.Second)
 	}
-	logger.Info("worker registered", "worker_id", reg.ID.String())
+	logger.Info("worker registered", "worker_id", reg.ID.String(), "node_id", cfg.NodeID)
 	base := "/workers/" + reg.ID.String()
 	life, stopWork := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopWork()
 	var paused atomic.Bool
+	paused.Store(cfg.NodeID != "")
 	var loops sync.WaitGroup
 	loops.Go(func() {
+		heartbeat := func() {
+			pool.Probe(ctx)
+			paths := pool.Advertise(cfg.Concurrency)
+			var out execution.Heartbeat
+			_, err := api.request(ctx, http.MethodPost, base+"/heartbeat", execution.Heartbeat{Paths: paths}, &out)
+			paused.Store(err != nil || out.Draining || (out.DesiredState != "" && out.DesiredState != "active"))
+			if responseCode(err, "not_found") {
+				_, _ = api.request(ctx, http.MethodPost, "/workers/register", reg, nil)
+			}
+		}
 		ticker := time.NewTicker(execution.HeartbeatInterval)
 		defer ticker.Stop()
+		if cfg.NodeID != "" {
+			heartbeat()
+		}
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				pool.Probe(ctx)
-				paths := pool.Advertise(cfg.Concurrency)
-				var out execution.Heartbeat
-				_, err := api.request(ctx, http.MethodPost, base+"/heartbeat", execution.Heartbeat{Paths: paths}, &out)
-				paused.Store(err != nil || out.Draining)
-				if responseCode(err, "not_found") {
-					_, _ = api.request(ctx, http.MethodPost, "/workers/register", reg, nil)
-				}
+				heartbeat()
 			}
 		}
 	})

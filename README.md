@@ -73,7 +73,7 @@ for the request shapes, schedule rules and test entry points.
 
 A worker uses `harvest worker --config config.worker.yaml` or
 `task dev:worker WORKER_CONFIG=path/to/worker.yaml`. Its YAML contains
-`control_url`, `token`, `concurrency`, `offers`, and optional `egress`.
+`node_id`, `control_url`, `token`, `concurrency`, `offers`, and optional `egress`.
 Each offer identifies a compiled executable `capability`,
 `implementation`, `request_schema` and `output_schema`. The matching server
 principal has role `worker` and declares `namespaces`, `capabilities`,
@@ -84,6 +84,30 @@ ingress. Worker readiness is available through
 can use the same YAML shape under `local_worker` with the server's local URL.
 For proxy deployment, use the [regional server](config.proxy.example.yaml)
 and [regional Worker](config.worker.proxy.example.yaml) examples.
+
+Set a unique, stable `node_id` for every managed Worker. Keep it unchanged
+across restarts. It accepts 1–64 lowercase ASCII letters, digits, hyphens and
+underscores, starting with a letter or digit. Each start still uses a new
+runtime UUID. Omitting `node_id` preserves legacy execution and heartbeat
+behavior. Legacy instances do not appear in the node registry. Goose migration
+9 creates the registry and audit tables while preserving existing execution rows.
+
+Use `GET /api/v1/operations/worker-nodes` and `GET
+/api/v1/operations/worker-nodes/{node_id}` to inspect registered nodes, including
+offline nodes. The list returns up to 30 entries and accepts `after` for the
+next page. The optional `namespace` restricts access to nodes dedicated to that
+namespace. Inspection and control of a shared node require grants for every
+namespace and capability it can execute. GoFurry uses the dedicated-namespace
+view. For control, an operator posts `state` (`active`, `paused` or `draining`),
+`revision` and `request_id` to `/api/v1/operations/worker-nodes/{node_id}/state`.
+Pause and drain stop new claims and let existing leases finish. Drain is
+complete when the active lease count reaches zero. The desired state survives
+offline periods and restarts.
+
+The registry HTTP regression can run on loopback PostgreSQL 18 with an explicit
+YAML that points to a migrated, isolated database whose name ends in `_test`.
+Set `HARVEST_NATIVE_TEST_DB_CONFIG` to its path and run
+`go test ./internal/routers -run '^TestWorkerNodesNative$'`.
 
 For a compiled HTTP capability, grant the named profile to the Worker
 principal and initialize the PostgreSQL policy once. After `task migrate

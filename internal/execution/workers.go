@@ -18,7 +18,8 @@ import (
 
 func (e *Engine) registrationKeys(p config.Principal, req Registration) ([]string, []string, error) {
 	if !UUIDv7(req.ID) || req.Capacity < 1 || req.Capacity > p.MaxSlots ||
-		len(req.Offers) < 1 || len(req.Offers) > 32 || len(req.EgressProfiles) > 32 {
+		len(req.Offers) < 1 || len(req.Offers) > 32 || len(req.EgressProfiles) > 32 ||
+		(req.NodeID != "" && !config.ValidWorkerNodeID(req.NodeID)) {
 		return nil, nil, ErrInvalid
 	}
 	keys := make([]string, 0, len(req.Offers))
@@ -57,14 +58,22 @@ func (e *Engine) RegisterWorker(ctx context.Context, p config.Principal, in Regi
 		return err
 	}
 	_, err = tx(ctx, e, func(db *q.Queries) (struct{}, error) {
+		var nodeID *string
+		if in.NodeID != "" {
+			nodeID = &in.NodeID
+			if err := registerWorkerNode(ctx, db, p, in); err != nil {
+				return struct{}{}, err
+			}
+		}
 		err := db.InsertWorker(ctx, q.InsertWorkerParams{
-			ID: in.ID, Principal: p.Name, Offers: keys, EgressProfiles: profiles, Capacity: in.Capacity, NetworkPaths: paths,
+			ID: in.ID, Principal: p.Name, Offers: keys, EgressProfiles: profiles, Capacity: in.Capacity, NetworkPaths: paths, NodeID: nodeID,
 		})
 		if err != nil {
 			return struct{}{}, err
 		}
 		w, err := found(db.Worker(ctx, q.WorkerParams{ID: in.ID, Principal: p.Name}))
-		if err == nil && (w.Capacity != in.Capacity || !slices.Equal(w.Offers, keys) || !slices.Equal(w.EgressProfiles, profiles) || !samePaths(w.NetworkPaths, paths)) {
+		if err == nil && ((w.NodeID == nil && nodeID != nil) || (w.NodeID != nil && *w.NodeID != in.NodeID) ||
+			w.Capacity != in.Capacity || !slices.Equal(w.Offers, keys) || !slices.Equal(w.EgressProfiles, profiles) || !samePaths(w.NetworkPaths, paths)) {
 			err = ErrConflict
 		}
 		return struct{}{}, err
@@ -73,25 +82,29 @@ func (e *Engine) RegisterWorker(ctx context.Context, p config.Principal, in Regi
 }
 
 func (e *Engine) Heartbeat(ctx context.Context, p config.Principal, id uuid.UUID, in Heartbeat) (Heartbeat, error) {
-	args := q.HeartbeatWorkerParams{ID: id, Principal: p.Name, Draining: in.Draining}
-	if in.Paths != nil {
-		// Registration fixes identity and capacity for the lifetime of the
-		// process. Heartbeats may change only coarse health.
-		old, err := found(e.queries.Worker(ctx, q.WorkerParams{ID: id, Principal: p.Name}))
-		if err != nil {
-			return Heartbeat{}, err
-		}
-		paths, err := e.validatePaths(p, old.Capacity, in.Paths)
-		if err != nil {
-			return Heartbeat{}, err
-		}
-		if !samePaths(old.NetworkPaths, paths) {
-			return Heartbeat{}, ErrConflict
-		}
-		args.Paths = paths
+	if in.DesiredState != "" {
+		return Heartbeat{}, ErrInvalid
 	}
-	w, err := found(e.queries.HeartbeatWorker(ctx, args))
-	return Heartbeat{Draining: w.Draining || e.draining.Load()}, err
+	return tx(ctx, e, func(db *q.Queries) (Heartbeat, error) {
+		old, state, err := lockRuntime(ctx, db, p.Name, id)
+		if err != nil {
+			return Heartbeat{}, err
+		}
+		args := q.HeartbeatWorkerParams{ID: id, Principal: p.Name, Draining: in.Draining}
+		if in.Paths != nil {
+			// Registration fixes identity and capacity. Only path health may change.
+			paths, err := e.validatePaths(p, old.Capacity, in.Paths)
+			if err != nil {
+				return Heartbeat{}, err
+			}
+			if !samePaths(old.NetworkPaths, paths) {
+				return Heartbeat{}, ErrConflict
+			}
+			args.Paths = paths
+		}
+		w, err := db.HeartbeatWorker(ctx, args)
+		return Heartbeat{Draining: w.Draining || e.draining.Load(), DesiredState: state}, err
+	})
 }
 
 func (e *Engine) Claim(ctx context.Context, p config.Principal, id uuid.UUID) (*Claim, error) {
@@ -101,8 +114,8 @@ func (e *Engine) Claim(ctx context.Context, p config.Principal, id uuid.UUID) (*
 		return nil, ErrDraining
 	}
 	return tx(ctx, e, func(db *q.Queries) (*Claim, error) {
-		// Worker -> Job -> Attempt. Only claims hold a Worker row lock.
-		w, err := found(db.LockWorker(ctx, q.LockWorkerParams{ID: id, Principal: p.Name}))
+		// Managed Node -> Worker -> Job -> Attempt. State changes lock the same Node.
+		w, state, err := lockRuntime(ctx, db, p.Name, id)
 		if err != nil {
 			return nil, err
 		}
@@ -110,7 +123,7 @@ func (e *Engine) Claim(ctx context.Context, p config.Principal, id uuid.UUID) (*
 		if err != nil {
 			return nil, err
 		}
-		if w.Draining || !w.LastSeen.Add(WorkerTTL).After(now) {
+		if (state != "" && state != "active") || w.Draining || !w.LastSeen.Add(WorkerTTL).After(now) {
 			return nil, ErrDraining
 		}
 		if slices.ContainsFunc(w.EgressProfiles, func(name string) bool { return !slices.Contains(p.EgressProfiles, name) }) {
