@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/librecosta/harvest/internal/egress"
@@ -117,7 +118,8 @@ func ValidateNetwork(c egress.NetworkConfig) error {
 		key := s.Capability + "/" + s.Namespace
 		r := routes[s.Profile]
 		if !validCapability(s.Capability) || !provider.Identifier(s.Namespace) || sources[key] ||
-			r.Profile == "" || !quotas[s.ProviderBucket] || !quotas[s.AccountBucket] {
+			r.Profile == "" || !quotas[s.ProviderBucket] || !quotas[s.AccountBucket] || !region(s.EgressRegion) ||
+			(s.EgressRegion != "" && !slices.ContainsFunc(r.Paths, func(path egress.PathConfig) bool { return path.Region == s.EgressRegion })) {
 			return errors.New("invalid or duplicate server source policy")
 		}
 		sources[key] = true

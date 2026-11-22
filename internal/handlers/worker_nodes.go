@@ -44,6 +44,15 @@ func (a *API) WorkerNode(c fiber.Ctx) error {
 	return a.respond(c, 200, result, err)
 }
 
+func (a *API) WorkerHealth(c fiber.Ctx) error {
+	namespace, _, err := workerNodeQuery(c, false)
+	if err != nil {
+		return a.respond(c, 200, nil, err)
+	}
+	out, err := a.engine.GetWorkerHealth(c.Context(), request(c).principal, namespace, c.Params("node"))
+	return a.respond(c, 200, out, err)
+}
+
 func (a *API) EditWorkerNode() fiber.Handler {
 	return action(a, 200, func(c fiber.Ctx, p config.Principal, edit execution.WorkerNodeEdit) (any, error) {
 		namespace, _, err := workerNodeQuery(c, false)

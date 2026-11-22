@@ -131,6 +131,27 @@ paths, regions, health and capacity. Direct fallback requires
 permits direct access. Supported transports include direct HTTP(S), HTTP(S)
 CONNECT and SOCKS5.
 
+Migration 10 adds 24-hour minute summaries for Nodes configured with
+`node_id`. The registry reports proxy connection checks, passive request
+transport, fixed Google DoH and Steam storefront checks, latency, failure
+streaks and cooldown recoveries. Worker diagnostics never follow redirects
+or accept a destination from a caller. Each Worker performs at most one
+fixed check every five seconds and checks each path/target at most every
+ten minutes. Diagnostic results never open or close the proxy breaker.
+Google DoH checks use Google's public bootstrap address with verified TLS
+and query only `example.com`. Steam checks verify a response to a HEAD
+request against the storefront. Health is visible through the scoped
+`/api/v1/operations/worker-nodes/{node_id}/egress-health` read endpoint.
+
+GoFurry Management uses the scoped `/api/v1/operations/egress-policy`
+view and revisioned source edit. Edits select an existing Profile and its
+declared mode, optionally pinning the capability's egress region. Worker
+profiles, transport addresses, credentials, shared quotas and topology
+remain independently configured. A pinned region must match an explicit
+task region. If there is no region in the request or source policy, the
+route must have a single region. Direct fallback requires explicit
+`prefer_proxy` permission and a direct path in that same region.
+
 Use `GET /api/v1/observations/current` and `/observations/history` for scoped
 reads. Operators enroll consumers explicitly. Consumers poll `/changes`,
 durably apply the feed, then ACK. See the [A3 acceptance and recovery guide](docs/harvest-v0.1-a3-acceptance.md)

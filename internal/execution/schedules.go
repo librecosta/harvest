@@ -294,6 +294,9 @@ func (e *Engine) Prune(ctx context.Context) error {
 	if err := e.queries.PruneWorkers(ctx); err != nil {
 		return err
 	}
+	if err := e.queries.PruneWorkerHealth(ctx); err != nil {
+		return err
+	}
 	e.admission.RLock()
 	defer e.admission.RUnlock()
 	if e.policyUncertain {

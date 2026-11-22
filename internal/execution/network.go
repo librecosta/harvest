@@ -5,6 +5,7 @@ import (
 	json "encoding/json/v2"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/librecosta/harvest/internal/config"
 	q "github.com/librecosta/harvest/internal/database/queries"
@@ -55,6 +56,7 @@ func (e *Engine) validatePaths(p config.Principal, capacity int32, paths []egres
 	})
 	for i, a := range paths {
 		if !slices.Contains(p.EgressProfiles, a.Profile) || a.Capacity < 1 || a.Capacity > capacity ||
+			a.InFlight < 0 || a.InFlight > 16 || (!a.CooldownUntil.IsZero() && a.State != "cooldown") ||
 			(i > 0 && paths[i-1].Profile == a.Profile && paths[i-1].ID == a.ID) {
 			return nil, ErrForbidden
 		}
@@ -85,15 +87,22 @@ func samePaths(left, right []byte) bool {
 	b, be := decodePaths(right)
 	return ae == nil && be == nil && slices.EqualFunc(a, b, func(l, r egress.Advertisement) bool {
 		l.State, r.State = "", ""
+		l.InFlight, r.InFlight = 0, 0
+		l.CooldownUntil, r.CooldownUntil = time.Time{}, time.Time{}
+		l.CheckedAt, r.CheckedAt = time.Time{}, time.Time{}
 		return l == r
 	})
 }
 
 func (e *Engine) plan(p config.Principal, rule egress.SourceConfig, region string, paths []egress.Advertisement) (*egress.Plan, bool) {
-	if !slices.Contains(p.EgressProfiles, rule.Profile) {
+	if rule.Profile == "" || !slices.Contains(p.EgressProfiles, rule.Profile) {
 		return nil, false
 	}
 	route := e.route(rule.Profile)
+	region, allowed := resolveEgressRegion(rule, route, region)
+	if !allowed {
+		return nil, false
+	}
 	plan := &egress.Plan{Profile: route.Profile, Mode: route.Mode, AllowDirect: route.AllowDirect}
 	healthy := false
 	for _, a := range paths {
@@ -104,6 +113,20 @@ func (e *Engine) plan(p config.Principal, rule egress.SourceConfig, region strin
 		healthy = healthy || a.State == "healthy" || a.State == "degraded"
 	}
 	return plan, healthy
+}
+
+func resolveEgressRegion(rule egress.SourceConfig, route egress.RouteConfig, requested string) (string, bool) {
+	if rule.EgressRegion != "" {
+		return rule.EgressRegion, requested == "" || requested == rule.EgressRegion
+	}
+	if requested != "" {
+		return requested, true
+	}
+	if len(route.Paths) == 0 {
+		return "", false
+	}
+	region := route.Paths[0].Region
+	return region, !slices.ContainsFunc(route.Paths, func(path egress.PathConfig) bool { return path.Region != region })
 }
 
 func routeKey(offer, namespace, region string) string { return offer + "|" + namespace + "|" + region }
@@ -145,14 +168,20 @@ func (e *Engine) dispatchOffers(ctx context.Context, db *q.Queries, p config.Pri
 			if rule.Capability != name || !canNamespace(p, rule.Namespace) || slices.ContainsFunc(blocked, func(row q.UnavailableQuotaAccountsRow) bool { return row.Key == rule.AccountBucket }) {
 				continue
 			}
-			plan, ready := e.plan(p, rule, "", paths)
-			if !ready {
+			if !slices.Contains(p.EgressProfiles, rule.Profile) {
 				continue
 			}
-			network = append(network, routeKey(cap.Key(), rule.Namespace, ""))
-			for _, a := range plan.Paths {
+			if _, ready := e.plan(p, rule, "", paths); ready {
+				network = append(network, routeKey(cap.Key(), rule.Namespace, ""))
+			}
+			route := e.route(rule.Profile)
+			for _, a := range paths {
 				key := routeKey(cap.Key(), rule.Namespace, a.Region)
-				if a.Region != "" && (a.State == "healthy" || a.State == "degraded") && !slices.Contains(network, key) {
+				if a.Region == "" || (rule.EgressRegion != "" && a.Region != rule.EgressRegion) ||
+					(a.State != "healthy" && a.State != "degraded") || slices.Contains(network, key) {
+					continue
+				}
+				if _, eligible := routePath(route, a); eligible {
 					network = append(network, key)
 				}
 			}
@@ -194,6 +223,12 @@ func (e *Engine) networkWaiting(ctx context.Context, job q.HarvestJob, cap provi
 	var scope provider.Scope
 	if err := json.Unmarshal(job.Scope, &scope); err != nil {
 		return "", err
+	}
+	if rule.EgressRegion != "" && scope.EgressRegion != "" && scope.EgressRegion != rule.EgressRegion {
+		return "egress_region_conflict", nil
+	}
+	if _, allowed := resolveEgressRegion(rule, e.route(rule.Profile), scope.EgressRegion); !allowed {
+		return "egress_region_required", nil
 	}
 	workers, err := e.queries.NetworkWorkers(ctx, q.NetworkWorkersParams{
 		Principals: e.workerPrincipals(job.Namespace, []string{job.Capability}), ExecutionKey: job.ExecutionKey,

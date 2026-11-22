@@ -91,6 +91,7 @@ func (e *Engine) Heartbeat(ctx context.Context, p config.Principal, id uuid.UUID
 			return Heartbeat{}, err
 		}
 		args := q.HeartbeatWorkerParams{ID: id, Principal: p.Name, Draining: in.Draining}
+		validatedPaths := old.NetworkPaths
 		if in.Paths != nil {
 			// Registration fixes identity and capacity. Only path health may change.
 			paths, err := e.validatePaths(p, old.Capacity, in.Paths)
@@ -101,6 +102,10 @@ func (e *Engine) Heartbeat(ctx context.Context, p config.Principal, id uuid.UUID
 				return Heartbeat{}, ErrConflict
 			}
 			args.Paths = paths
+			validatedPaths = paths
+		}
+		if err := storeWorkerHealth(ctx, db, old, validatedPaths, in.Health); err != nil {
+			return Heartbeat{}, err
 		}
 		w, err := db.HeartbeatWorker(ctx, args)
 		return Heartbeat{Draining: w.Draining || e.draining.Load(), DesiredState: state}, err

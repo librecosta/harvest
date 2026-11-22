@@ -36,6 +36,7 @@ func requestBodyLimit(h *fasthttp.RequestHeader) fasthttp.RequestConfig {
 		prefix, suffix string
 		limit          int
 	}{
+		{"/internal/v1/workers/", "/heartbeat", execution.MaxHeartbeatBody},
 		{"/internal/v1/attempts/", "/complete", provider.MaxCompletionBody},
 		{"/internal/v1/permits/", "/finish", execution.MaxPermitFinishBody},
 	} {

@@ -51,6 +51,7 @@ type SourceConfig struct {
 	Capability     string `mapstructure:"capability" json:"capability"`
 	Namespace      string `mapstructure:"namespace" json:"namespace"`
 	Profile        string `mapstructure:"profile" json:"profile"`
+	EgressRegion   string `mapstructure:"egress_region" json:"egress_region,omitempty"`
 	ProviderBucket string `mapstructure:"provider_bucket" json:"provider_bucket"`
 	AccountBucket  string `mapstructure:"account_bucket" json:"account_bucket"`
 }

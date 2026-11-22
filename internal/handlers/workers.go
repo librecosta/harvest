@@ -17,7 +17,7 @@ func (a *API) RegisterWorker() fiber.Handler {
 }
 
 func (a *API) HeartbeatWorker() fiber.Handler {
-	return action(a, 200, func(c fiber.Ctx, p config.Principal, in execution.Heartbeat) (any, error) {
+	return boundedAction(a, 200, execution.MaxHeartbeatBody, func(c fiber.Ctx, p config.Principal, in execution.Heartbeat) (any, error) {
 		id, err := pathID(c)
 		if err != nil {
 			return nil, err

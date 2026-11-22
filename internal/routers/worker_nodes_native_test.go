@@ -122,6 +122,14 @@ func TestWorkerNodesNative(t *testing.T) {
 	if _, exists := oldHeartbeat["desired_state"]; exists {
 		t.Fatal("legacy heartbeat response changed")
 	}
+	healthPath := nodePath + "/" + id + "/egress-health" + suffix
+	check := egress.HealthReport{Profile: "local", PathID: "local-clash", Kind: "http", Region: "intl", CheckType: "google_doh",
+		LastOutcome: "transport_failure", Failures: 1, TransportFailures: 1, TrailingFailures: 1, LastLatencyMS: 42, LatencyMS: 42}
+	batch := execution.Heartbeat{Health: &execution.WorkerHealthBatch{Sequence: 1, Reports: []egress.HealthReport{check}}}
+	call("POST", workerPath+reg.ID.String()+"/heartbeat", workerPrincipal.Token, batch, nil, 200)
+	call("POST", workerPath+reg.ID.String()+"/heartbeat", workerPrincipal.Token, batch, nil, 200)
+	call("GET", healthPath, global.Token, nil, nil, 200)
+	call("GET", nodePath+"/"+sharedReg.NodeID+"/egress-health"+suffix, operator.Token, nil, nil, 404)
 	var list execution.WorkerNodeList
 	call("GET", nodePath+suffix, reader.Token, nil, &list, 200)
 	if len(list.Items) != 1 || list.Items[0].NodeID != id || list.Items[0].CanManage {
@@ -214,6 +222,21 @@ func TestWorkerNodesNative(t *testing.T) {
 	call("POST", runtimePath+"/claim", workerPrincipal.Token, nil, nil, 409)
 	call("POST", workerPath+"register", workerPrincipal.Token, reg, nil, 409)
 	newRuntime := workerPath + second.ID.String()
+	var health execution.WorkerHealthView
+	call("GET", healthPath, operator.Token, nil, &health, 200)
+	if health.WindowHours != 24 || len(health.Checks) != 1 || health.Checks[0].Failures != 1 || health.Checks[0].ConsecutiveFailures != 1 {
+		t.Fatalf("worker health was duplicated or lost on restart: %+v", health)
+	}
+	call("POST", newRuntime+"/heartbeat", workerPrincipal.Token, batch, nil, 200)
+	check.LastOutcome, check.Failures, check.TransportFailures, check.TrailingFailures, check.Successes = "ok", 0, 0, 0, 1
+	call("POST", newRuntime+"/heartbeat", workerPrincipal.Token, execution.Heartbeat{
+		Health: &execution.WorkerHealthBatch{Sequence: 2, Reports: []egress.HealthReport{check}},
+	}, nil, 200)
+	call("GET", healthPath, operator.Token, nil, &health, 200)
+	if len(health.Checks) != 1 || health.Checks[0].Failures != 2 || health.Checks[0].Successes != 1 ||
+		health.Checks[0].ConsecutiveFailures != 0 || health.Checks[0].LastOutcome != "ok" {
+		t.Fatalf("recovery did not preserve prior statistics: %+v", health)
+	}
 	call("POST", newRuntime+"/heartbeat", workerPrincipal.Token, execution.Heartbeat{}, &heartbeat, 200)
 	if heartbeat.DesiredState != "draining" {
 		t.Fatal("node lost its desired state across runtime replacement")

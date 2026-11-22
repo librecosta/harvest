@@ -78,6 +78,8 @@ func (c client) request(ctx context.Context, method, path string, in, out any) (
 		payload, err = json.Marshal(in)
 		limit := execution.MaxBodySize
 		switch in.(type) {
+		case execution.Heartbeat:
+			limit = execution.MaxHeartbeatBody
 		case execution.Completion:
 			limit = provider.MaxCompletionBody
 		case execution.PermitFinish:

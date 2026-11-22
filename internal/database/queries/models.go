@@ -85,6 +85,22 @@ type HarvestCurrentResult struct {
 	ConfirmedAt   time.Time `json:"confirmed_at"`
 }
 
+type HarvestEgressPolicyAction struct {
+	RequestID  uuid.UUID `json:"request_id"`
+	Principal  string    `json:"principal"`
+	ActorID    uuid.UUID `json:"actor_id"`
+	ActorName  string    `json:"actor_name"`
+	ActorRole  string    `json:"actor_role"`
+	Namespace  string    `json:"namespace"`
+	Capability string    `json:"capability"`
+	Revision   int64     `json:"revision"`
+	OldProfile string    `json:"old_profile"`
+	OldRegion  string    `json:"old_region"`
+	Profile    string    `json:"profile"`
+	Region     string    `json:"region"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
 type HarvestJob struct {
 	ID                uuid.UUID  `json:"id"`
 	TargetID          uuid.UUID  `json:"target_id"`
@@ -230,6 +246,26 @@ type HarvestWorker struct {
 	Draining       bool      `json:"draining"`
 	NetworkPaths   []byte    `json:"network_paths"`
 	NodeID         *string   `json:"node_id"`
+	HealthSequence int64     `json:"health_sequence"`
+}
+
+type HarvestWorkerEgressHealth struct {
+	NodeID              string    `json:"node_id"`
+	Profile             string    `json:"profile"`
+	PathID              string    `json:"path_id"`
+	Kind                string    `json:"kind"`
+	Region              string    `json:"region"`
+	CheckType           string    `json:"check_type"`
+	MinuteAt            time.Time `json:"minute_at"`
+	LastAt              time.Time `json:"last_at"`
+	LastOutcome         string    `json:"last_outcome"`
+	Successes           int64     `json:"successes"`
+	Failures            int64     `json:"failures"`
+	TransportFailures   int64     `json:"transport_failures"`
+	LatencyMs           int64     `json:"latency_ms"`
+	LastLatencyMs       int32     `json:"last_latency_ms"`
+	ConsecutiveFailures int64     `json:"consecutive_failures"`
+	Recoveries          int64     `json:"recoveries"`
 }
 
 type HarvestWorkerNode struct {

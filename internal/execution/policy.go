@@ -290,7 +290,11 @@ func (e *Engine) InitNetworkPolicy(ctx context.Context, network egress.NetworkCo
 }
 
 func (e *Engine) ReplaceNetworkPolicy(ctx context.Context, p config.Principal, in PolicyUpdate) (PolicyView, error) {
-	if in.ExpectedRevision < 1 || in.Policy == nil {
+	return e.replaceNetworkPolicy(ctx, p, in, nil)
+}
+
+func (e *Engine) replaceNetworkPolicy(ctx context.Context, p config.Principal, in PolicyUpdate, scoped *EgressPolicyEdit) (PolicyView, error) {
+	if in.ExpectedRevision < 1 || (scoped == nil && in.Policy == nil) {
 		return PolicyView{}, ErrInvalid
 	}
 	e.admission.Lock()
@@ -298,19 +302,39 @@ func (e *Engine) ReplaceNetworkPolicy(ctx context.Context, p config.Principal, i
 	if e.draining.Load() {
 		return PolicyView{}, ErrDraining
 	}
-	if !coversNetwork(p, e.network) || !coversNetwork(p, *in.Policy) {
+	if scoped == nil && (!coversNetwork(p, e.network) || !coversNetwork(p, *in.Policy)) {
 		return PolicyView{}, ErrForbidden
 	}
 	if e.policyUncertain {
 		if err := e.loadNetworkPolicy(ctx); err != nil {
 			return PolicyView{}, ErrPolicyUnavailable
 		}
-		if !coversNetwork(p, e.network) {
+		if scoped == nil && !coversNetwork(p, e.network) {
 			return PolicyView{}, ErrForbidden
 		}
 	}
 	if e.policy.Revision == 0 {
 		return PolicyView{}, ErrPolicyMissing
+	}
+	var oldSource egress.SourceConfig
+	if scoped != nil {
+		if in.ExpectedRevision != e.policy.Revision {
+			return PolicyView{}, ErrPolicyConflict
+		}
+		oldSource = e.source(scoped.Capability, scoped.Namespace)
+		if oldSource.Profile == "" {
+			return PolicyView{}, ErrNotFound
+		}
+		route := e.route(scoped.Profile)
+		if route.Profile == "" || route.Mode != scoped.Mode {
+			return PolicyView{}, ErrPolicyInvalid
+		}
+		candidate := e.network
+		candidate.Sources = slices.Clone(candidate.Sources)
+		index := slices.Index(candidate.Sources, oldSource)
+		candidate.Sources[index].Profile = scoped.Profile
+		candidate.Sources[index].EgressRegion = scoped.Region
+		in.Policy = &candidate
 	}
 	next := canonicalNetwork(*in.Policy)
 	var bindings map[string]string
@@ -333,8 +357,14 @@ func (e *Engine) ReplaceNetworkPolicy(ctx context.Context, p config.Principal, i
 			return old, err
 		}
 		data, sum, err := policyBytes(next)
-		if err != nil || bytes.Equal(sum, old.Checksum) {
+		if err != nil {
 			return old, err
+		}
+		if bytes.Equal(sum, old.Checksum) {
+			if scoped != nil {
+				return old, ErrPolicyConflict
+			}
+			return old, nil
 		}
 		ledger, err := json.Marshal(bindings, json.Deterministic(true))
 		if err != nil {
@@ -347,9 +377,21 @@ func (e *Engine) ReplaceNetworkPolicy(ctx context.Context, p config.Principal, i
 		if !sameRouting(e.network, next) {
 			routing = old.Revision + 1
 		}
-		return db.ReplaceNetworkPolicy(ctx, q.ReplaceNetworkPolicyParams{
+		updated, err := db.ReplaceNetworkPolicy(ctx, q.ReplaceNetworkPolicyParams{
 			RoutingRevision: routing, Policy: data, Bindings: ledger, Checksum: sum, UpdatedBy: p.Name,
 		})
+		if err != nil || scoped == nil {
+			return updated, err
+		}
+		err = db.InsertEgressPolicyAction(ctx, q.InsertEgressPolicyActionParams{
+			RequestID: scoped.RequestID, Principal: p.Name, ActorID: scoped.ActorID, ActorName: scoped.ActorName, ActorRole: scoped.ActorRole,
+			Namespace: scoped.Namespace, Capability: scoped.Capability, Revision: updated.Revision,
+			OldProfile: oldSource.Profile, OldRegion: oldSource.EgressRegion, Profile: scoped.Profile, Region: scoped.Region,
+		})
+		if err != nil {
+			return old, err
+		}
+		return updated, nil
 	})
 	if err != nil {
 		if row.Revision <= e.policy.Revision {

@@ -87,6 +87,7 @@ type Heartbeat struct {
 	DesiredState string                 `json:"desired_state,omitempty"`
 	Draining     bool                   `json:"draining"`
 	Paths        []egress.Advertisement `json:"paths,omitempty"`
+	Health       *WorkerHealthBatch     `json:"health,omitempty"`
 }
 
 type Claim struct {

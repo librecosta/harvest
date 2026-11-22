@@ -313,11 +313,20 @@ func (s *Session) send(ctx context.Context, r *http.Request, path reservation, o
 	deadline := start.Add(time.Duration(grant.LeaseMS)*time.Millisecond - 100*time.Millisecond)
 	wire, cancel := context.WithDeadline(ctx, deadline)
 	var metadataBytes int64
+	var wireStarted time.Time
 	finish := func(u Usage, networkErr error, reached bool) {
 		cancel()
 		u.BootstrapAttempt = stage == RDAPBootstrap
 		u.LatencyMS = min(MaxPermitTime.Milliseconds(), time.Since(start).Milliseconds())
-		s.pool.release(path, min(path.maxBytes, metadataBytes+u.Bytes), networkErr, reached)
+		var measured string
+		if !wireStarted.IsZero() && ctx.Err() == nil {
+			if u.Outcome == "transport" || networkErr != nil {
+				measured = "transport_failure"
+			} else if reached {
+				measured = "ok"
+			}
+		}
+		s.pool.releaseMeasured(path, min(path.maxBytes, metadataBytes+u.Bytes), networkErr, reached, measured, time.Since(wireStarted))
 		s.gate.Finish(context.WithoutCancel(ctx), grant.ID, u)
 	}
 	if wire.Err() != nil {
@@ -344,6 +353,7 @@ func (s *Session) send(ctx context.Context, r *http.Request, path reservation, o
 	// both stale-connection retry branches. Each retry needs a fresh permit.
 	request.Body = io.NopCloser(strings.NewReader(""))
 	request.GetBody = nil
+	wireStarted = time.Now()
 	res, err := path.transport.RoundTrip(request)
 	if err != nil {
 		wireErr := wire.Err()

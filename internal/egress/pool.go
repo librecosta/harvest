@@ -16,6 +16,7 @@ type endpoint struct {
 	url       *url.URL
 	state     string
 	nextProbe time.Time
+	checkedAt time.Time
 	probing   bool
 	inflight  int32
 	window    time.Time
@@ -34,16 +35,23 @@ type cachedTransport struct {
 }
 
 type Pool struct {
-	mu         sync.Mutex
-	profiles   []ProfileConfig
-	endpoints  map[string]*endpoint
-	transports map[transportKey]cachedTransport
-	draining   bool
-	closeOnce  sync.Once
+	mu            sync.Mutex
+	profiles      []ProfileConfig
+	endpoints     map[string]*endpoint
+	transports    map[transportKey]cachedTransport
+	draining      bool
+	directUse     map[string]int32
+	health        map[healthKey]HealthReport
+	diagnosed     map[healthKey]time.Time
+	directChecks  map[string]time.Time
+	nextDiagnosis time.Time
+	closeOnce     sync.Once
 }
 
 func NewPool(cfg Config) *Pool {
-	p := &Pool{profiles: cfg.Profiles, endpoints: make(map[string]*endpoint), transports: make(map[transportKey]cachedTransport)}
+	p := &Pool{profiles: cfg.Profiles, endpoints: make(map[string]*endpoint), transports: make(map[transportKey]cachedTransport),
+		directUse: make(map[string]int32), health: make(map[healthKey]HealthReport), diagnosed: make(map[healthKey]time.Time),
+		directChecks: make(map[string]time.Time)}
 	for _, c := range cfg.Endpoints {
 		u, _ := url.Parse(c.URL) // Validated at configuration load.
 		state := "disabled"
@@ -79,11 +87,17 @@ func (p *Pool) Advertise(slots int32) []Advertisement {
 	paths := make([]Advertisement, 0)
 	for _, profile := range p.profiles {
 		if profile.Mode == Direct || profile.AllowDirect {
-			paths = append(paths, Advertisement{profile.Name, profile.Mode, Direct, Direct, profile.DirectRegion, "healthy", slots})
+			paths = append(paths, Advertisement{Profile: profile.Name, Mode: profile.Mode, ID: Direct, Kind: Direct,
+				Region: profile.DirectRegion, State: "healthy", Capacity: slots, InFlight: p.directUse[profile.Name], CheckedAt: p.directChecks[profile.Name]})
 		}
 		for _, id := range profile.Endpoints {
 			e := p.endpoints[id]
-			paths = append(paths, Advertisement{profile.Name, profile.Mode, id, e.url.Scheme, e.cfg.Region, e.state, min(slots, e.cfg.Concurrency)})
+			path := Advertisement{Profile: profile.Name, Mode: profile.Mode, ID: id, Kind: e.url.Scheme, Region: e.cfg.Region,
+				State: e.state, Capacity: min(slots, e.cfg.Concurrency), InFlight: e.inflight, CheckedAt: e.checkedAt}
+			if e.state == "cooldown" {
+				path.CooldownUntil = e.nextProbe.UTC()
+			}
+			paths = append(paths, path)
 		}
 	}
 	return paths
@@ -107,6 +121,7 @@ func (p *Pool) Probe(ctx context.Context) {
 	}
 	p.mu.Unlock()
 	for _, e := range probes {
+		started := time.Now()
 		call, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 		conn, err := dialProxy(call, &net.Dialer{}, e.url, nil)
 		cancel()
@@ -116,6 +131,7 @@ func (p *Pool) Probe(ctx context.Context) {
 		p.mu.Lock()
 		e.probing = false
 		now := time.Now()
+		recovered := false
 		// A newer passive failure wins over an older active probe.
 		if !now.Before(e.nextProbe) {
 			switch {
@@ -124,8 +140,21 @@ func (p *Pool) Probe(ctx context.Context) {
 			case e.state == "healthy":
 				e.nextProbe = now.Add(30 * time.Second)
 			default:
+				recovered = e.state == "cooldown"
 				e.state = "degraded" // one half-open, quota-gated source request
 				e.nextProbe = now.Add(30 * time.Second)
+			}
+		}
+		result := "ok"
+		if err != nil {
+			result = "transport_failure"
+		}
+		if ctx.Err() == nil {
+			e.checkedAt = now.UTC()
+			for _, profile := range p.profiles {
+				if slices.Contains(profile.Endpoints, e.cfg.ID) {
+					p.recordHealth(healthKey{profile.Name, e.cfg.ID, e.url.Scheme, e.cfg.Region, "proxy_connection"}, result, now.Sub(started), recovered)
+				}
 			}
 		}
 		p.mu.Unlock()
@@ -231,17 +260,28 @@ func (p *Pool) reserve(plan Plan, source Source, namespace, capability, pinned s
 		selected.inflight++
 		selected.used += r.maxBytes
 		r.epoch = selected.window
+	} else {
+		p.directUse[path.Profile]++
 	}
 	return r, nil
 }
 
 func (p *Pool) release(r reservation, n int64, networkErr error, reached bool) {
-	e := r.endpoint
-	if e == nil {
-		return
-	}
+	p.releaseMeasured(r, n, networkErr, reached, "", 0)
+}
+
+func (p *Pool) releaseMeasured(r reservation, n int64, networkErr error, reached bool, outcome string, latency time.Duration) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if outcome != "" {
+		a := r.path
+		p.recordHealth(healthKey{a.Profile, a.ID, a.Kind, a.Region, "transport"}, outcome, latency, false)
+	}
+	e := r.endpoint
+	if e == nil {
+		p.directUse[r.path.Profile]--
+		return
+	}
 	e.inflight--
 	if r.epoch == e.window {
 		e.used -= r.maxBytes - n

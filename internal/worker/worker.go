@@ -68,12 +68,38 @@ func Run(ctx context.Context, cfg config.Worker, registry *provider.Registry, lo
 	var paused atomic.Bool
 	paused.Store(cfg.NodeID != "")
 	var loops sync.WaitGroup
+	if cfg.NodeID != "" {
+		loops.Go(func() {
+			ticker := time.NewTicker(execution.HeartbeatInterval)
+			defer ticker.Stop()
+			for ctx.Err() == nil {
+				pool.Diagnose(ctx)
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		})
+	}
 	loops.Go(func() {
+		var pending *execution.WorkerHealthBatch
+		var sequence int64
 		heartbeat := func() {
 			pool.Probe(ctx)
 			paths := pool.Advertise(cfg.Concurrency)
 			var out execution.Heartbeat
-			_, err := api.request(ctx, http.MethodPost, base+"/heartbeat", execution.Heartbeat{Paths: paths}, &out)
+			if pending == nil {
+				reports := pool.TakeHealth()
+				if cfg.NodeID != "" && len(reports) != 0 {
+					sequence++
+					pending = &execution.WorkerHealthBatch{Sequence: sequence, Reports: reports}
+				}
+			}
+			_, err := api.request(ctx, http.MethodPost, base+"/heartbeat", execution.Heartbeat{Paths: paths, Health: pending}, &out)
+			if err == nil {
+				pending = nil
+			}
 			paused.Store(err != nil || out.Draining || (out.DesiredState != "" && out.DesiredState != "active"))
 			if responseCode(err, "not_found") {
 				_, _ = api.request(ctx, http.MethodPost, "/workers/register", reg, nil)
