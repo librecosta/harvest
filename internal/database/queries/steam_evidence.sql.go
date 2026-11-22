@@ -12,21 +12,45 @@ import (
 	"uuid"
 )
 
+const advanceSteamEvidenceAttributionCursor = `-- name: AdvanceSteamEvidenceAttributionCursor :exec
+UPDATE harvest.steam_evidence_maintenance SET attribution_scan_at = $1, attribution_scan_id = $2 WHERE singleton
+`
+
+type AdvanceSteamEvidenceAttributionCursorParams struct {
+	AttributionScanAt time.Time `json:"attribution_scan_at"`
+	AttributionScanID uuid.UUID `json:"attribution_scan_id"`
+}
+
+func (q *Queries) AdvanceSteamEvidenceAttributionCursor(ctx context.Context, arg AdvanceSteamEvidenceAttributionCursorParams) error {
+	_, err := q.db.Exec(ctx, advanceSteamEvidenceAttributionCursor, arg.AttributionScanAt, arg.AttributionScanID)
+	return err
+}
+
+const advanceSteamEvidenceVersionCursor = `-- name: AdvanceSteamEvidenceVersionCursor :exec
+UPDATE harvest.steam_evidence_maintenance SET version_scan_at = $1, version_scan_id = $2 WHERE singleton
+`
+
+type AdvanceSteamEvidenceVersionCursorParams struct {
+	VersionScanAt time.Time `json:"version_scan_at"`
+	VersionScanID uuid.UUID `json:"version_scan_id"`
+}
+
+func (q *Queries) AdvanceSteamEvidenceVersionCursor(ctx context.Context, arg AdvanceSteamEvidenceVersionCursorParams) error {
+	_, err := q.db.Exec(ctx, advanceSteamEvidenceVersionCursor, arg.VersionScanAt, arg.VersionScanID)
+	return err
+}
+
 const archiveSteamEvidence = `-- name: ArchiveSteamEvidence :one
 INSERT INTO harvest.steam_evidence (
     id, namespace, target_id, capability, locale, store_country, egress_region, payload_sha256,
-    payload, payload_bytes, first_observed_at, last_confirmed_at, first_job_id, first_attempt_id, format_version
+    payload, payload_bytes, first_observed_at, last_confirmed_at, first_job_id, first_attempt_id, format_version,
+    last_server_confirmed_at, last_server_attempt_id
 )
 SELECT $1, $2, $3, 'steam.details',
     $4, $5, $6, s.payload_sha256, s.payload,
-    s.payload_bytes, s.observed_at, s.observed_at, $7, s.attempt_id, 1
+    s.payload_bytes, s.observed_at, s.observed_at, $7, s.attempt_id, 1, $8, s.attempt_id
 FROM harvest.steam_evidence_staging s
-WHERE s.attempt_id = $8 AND (
-    SELECT count(*) FROM harvest.steam_evidence e
-    WHERE e.namespace = $2 AND e.target_id = $3
-        AND e.capability = 'steam.details' AND e.locale = $4
-        AND e.store_country = $5 AND e.egress_region = $6
-) < 5
+WHERE s.attempt_id = $9
 RETURNING id
 `
 
@@ -38,6 +62,7 @@ type ArchiveSteamEvidenceParams struct {
 	StoreCountry string    `json:"store_country"`
 	EgressRegion string    `json:"egress_region"`
 	JobID        uuid.UUID `json:"job_id"`
+	ConfirmedAt  time.Time `json:"confirmed_at"`
 	AttemptID    uuid.UUID `json:"attempt_id"`
 }
 
@@ -50,6 +75,7 @@ func (q *Queries) ArchiveSteamEvidence(ctx context.Context, arg ArchiveSteamEvid
 		arg.StoreCountry,
 		arg.EgressRegion,
 		arg.JobID,
+		arg.ConfirmedAt,
 		arg.AttemptID,
 	)
 	var id uuid.UUID
@@ -86,17 +112,21 @@ UPDATE harvest.steam_evidence e
 SET first_observed_at = least(e.first_observed_at, s.observed_at),
     first_job_id = CASE WHEN (s.observed_at, s.attempt_id) < (e.first_observed_at, e.first_attempt_id) THEN a.job_id ELSE e.first_job_id END,
     first_attempt_id = CASE WHEN (s.observed_at, s.attempt_id) < (e.first_observed_at, e.first_attempt_id) THEN s.attempt_id ELSE e.first_attempt_id END,
-    last_confirmed_at = greatest(e.last_confirmed_at, s.observed_at)
+    last_confirmed_at = greatest(e.last_confirmed_at, s.observed_at),
+    last_server_confirmed_at = greatest(e.last_server_confirmed_at, $1::timestamptz),
+    last_server_attempt_id = CASE WHEN ($1::timestamptz, s.attempt_id) >
+      (e.last_server_confirmed_at, e.last_server_attempt_id) THEN s.attempt_id ELSE e.last_server_attempt_id END
 FROM harvest.steam_evidence_staging s JOIN harvest.attempts a ON a.id = s.attempt_id
-WHERE s.attempt_id = $1 AND e.payload_sha256 = s.payload_sha256
-    AND e.namespace = $2 AND e.target_id = $3
-    AND e.capability = 'steam.details' AND e.locale = $4
-    AND e.store_country = $5 AND e.egress_region = $6
+WHERE s.attempt_id = $2 AND e.payload_sha256 = s.payload_sha256
+    AND e.namespace = $3 AND e.target_id = $4
+    AND e.capability = 'steam.details' AND e.locale = $5
+    AND e.store_country = $6 AND e.egress_region = $7
     AND e.payload = s.payload
 RETURNING e.id
 `
 
 type ConfirmSteamEvidenceParams struct {
+	ConfirmedAt  time.Time `json:"confirmed_at"`
 	AttemptID    uuid.UUID `json:"attempt_id"`
 	Namespace    string    `json:"namespace"`
 	TargetID     uuid.UUID `json:"target_id"`
@@ -107,6 +137,7 @@ type ConfirmSteamEvidenceParams struct {
 
 func (q *Queries) ConfirmSteamEvidence(ctx context.Context, arg ConfirmSteamEvidenceParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, confirmSteamEvidence,
+		arg.ConfirmedAt,
 		arg.AttemptID,
 		arg.Namespace,
 		arg.TargetID,
@@ -117,6 +148,16 @@ func (q *Queries) ConfirmSteamEvidence(ctx context.Context, arg ConfirmSteamEvid
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const countSteamEvidenceCapacityRejection = `-- name: CountSteamEvidenceCapacityRejection :exec
+INSERT INTO harvest.steam_evidence_usage (namespace, capacity_limited_attempts) VALUES ($1, 1)
+ON CONFLICT (namespace) DO UPDATE SET capacity_limited_attempts = steam_evidence_usage.capacity_limited_attempts + 1
+`
+
+func (q *Queries) CountSteamEvidenceCapacityRejection(ctx context.Context, namespace string) error {
+	_, err := q.db.Exec(ctx, countSteamEvidenceCapacityRejection, namespace)
+	return err
 }
 
 const delaySteamEvidence = `-- name: DelaySteamEvidence :exec
@@ -135,6 +176,24 @@ DELETE FROM harvest.steam_evidence_staging WHERE attempt_id = $1
 
 func (q *Queries) DeleteStagedSteamEvidence(ctx context.Context, attemptID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, deleteStagedSteamEvidence, attemptID)
+	return err
+}
+
+const deleteSteamEvidenceAttributions = `-- name: DeleteSteamEvidenceAttributions :exec
+DELETE FROM harvest.steam_evidence_attribution WHERE attempt_id = ANY($1::uuid[])
+`
+
+func (q *Queries) DeleteSteamEvidenceAttributions(ctx context.Context, ids []uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteSteamEvidenceAttributions, ids)
+	return err
+}
+
+const deleteSteamEvidenceVersions = `-- name: DeleteSteamEvidenceVersions :exec
+DELETE FROM harvest.steam_evidence WHERE id = ANY($1::uuid[])
+`
+
+func (q *Queries) DeleteSteamEvidenceVersions(ctx context.Context, ids []uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteSteamEvidenceVersions, ids)
 	return err
 }
 
@@ -169,6 +228,158 @@ func (q *Queries) ExpireStagedSteamEvidence(ctx context.Context) error {
 	return err
 }
 
+const listSteamEvidence = `-- name: ListSteamEvidence :many
+WITH page AS MATERIALIZED (
+    SELECT e.id, e.namespace, e.target_id, e.capability, e.locale, e.store_country, e.egress_region, e.payload_sha256,
+        e.payload_bytes, e.first_observed_at, e.last_confirmed_at, e.last_server_confirmed_at, e.archived_at,
+        e.first_job_id, e.first_attempt_id, e.format_version
+    FROM harvest.steam_evidence e
+    WHERE e.namespace = $1::text AND e.id > $2::uuid
+        AND ($3::uuid IS NULL OR e.id = $3::uuid)
+        AND ($4::uuid IS NULL OR e.target_id = $4::uuid)
+        AND ($5::text = '' OR e.target_id = (
+            SELECT t.id FROM harvest.targets t WHERE t.provider = 'steam' AND t.resource_type = 'app'
+                AND t.namespace = $1::text AND t.external_key = $5::text
+        ))
+        AND ($6::text = '' OR e.locale = $6::text)
+        AND ($7::text = '' OR e.store_country = $7::text)
+        AND ($8::text = '' OR e.egress_region = $8::text)
+    ORDER BY e.id LIMIT $9::integer
+)
+SELECT e.id, e.namespace, e.target_id, t.external_key AS app_id, e.capability, e.locale, e.store_country,
+    e.egress_region, encode(e.payload_sha256, 'hex')::text AS sha256, e.payload_bytes,
+    e.first_observed_at, e.last_confirmed_at AS last_observed_at, e.last_server_confirmed_at AS confirmed_at,
+    e.archived_at, e.first_job_id, e.first_attempt_id, e.format_version
+FROM page e JOIN harvest.targets t ON t.id = e.target_id AND t.namespace = e.namespace
+ORDER BY e.id
+`
+
+type ListSteamEvidenceParams struct {
+	Namespace    string     `json:"namespace"`
+	AfterID      uuid.UUID  `json:"after_id"`
+	EvidenceID   *uuid.UUID `json:"evidence_id"`
+	TargetID     *uuid.UUID `json:"target_id"`
+	AppID        string     `json:"app_id"`
+	Locale       string     `json:"locale"`
+	StoreCountry string     `json:"store_country"`
+	EgressRegion string     `json:"egress_region"`
+	PageSize     int32      `json:"page_size"`
+}
+
+type ListSteamEvidenceRow struct {
+	ID              uuid.UUID  `json:"id"`
+	Namespace       string     `json:"namespace"`
+	TargetID        uuid.UUID  `json:"target_id"`
+	AppID           string     `json:"app_id"`
+	Capability      string     `json:"capability"`
+	Locale          string     `json:"locale"`
+	StoreCountry    string     `json:"store_country"`
+	EgressRegion    string     `json:"egress_region"`
+	Sha256          string     `json:"sha256"`
+	PayloadBytes    int32      `json:"payload_bytes"`
+	FirstObservedAt time.Time  `json:"first_observed_at"`
+	LastObservedAt  time.Time  `json:"last_observed_at"`
+	ConfirmedAt     time.Time  `json:"confirmed_at"`
+	ArchivedAt      *time.Time `json:"archived_at"`
+	FirstJobID      uuid.UUID  `json:"first_job_id"`
+	FirstAttemptID  uuid.UUID  `json:"first_attempt_id"`
+	FormatVersion   int32      `json:"format_version"`
+}
+
+func (q *Queries) ListSteamEvidence(ctx context.Context, arg ListSteamEvidenceParams) ([]ListSteamEvidenceRow, error) {
+	rows, err := q.db.Query(ctx, listSteamEvidence,
+		arg.Namespace,
+		arg.AfterID,
+		arg.EvidenceID,
+		arg.TargetID,
+		arg.AppID,
+		arg.Locale,
+		arg.StoreCountry,
+		arg.EgressRegion,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSteamEvidenceRow{}
+	for rows.Next() {
+		var i ListSteamEvidenceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Namespace,
+			&i.TargetID,
+			&i.AppID,
+			&i.Capability,
+			&i.Locale,
+			&i.StoreCountry,
+			&i.EgressRegion,
+			&i.Sha256,
+			&i.PayloadBytes,
+			&i.FirstObservedAt,
+			&i.LastObservedAt,
+			&i.ConfirmedAt,
+			&i.ArchivedAt,
+			&i.FirstJobID,
+			&i.FirstAttemptID,
+			&i.FormatVersion,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockSteamEvidenceMaintenance = `-- name: LockSteamEvidenceMaintenance :one
+SELECT singleton, version_scan_at, version_scan_id, attribution_scan_at, attribution_scan_id FROM harvest.steam_evidence_maintenance WHERE singleton FOR UPDATE
+`
+
+func (q *Queries) LockSteamEvidenceMaintenance(ctx context.Context) (HarvestSteamEvidenceMaintenance, error) {
+	row := q.db.QueryRow(ctx, lockSteamEvidenceMaintenance)
+	var i HarvestSteamEvidenceMaintenance
+	err := row.Scan(
+		&i.Singleton,
+		&i.VersionScanAt,
+		&i.VersionScanID,
+		&i.AttributionScanAt,
+		&i.AttributionScanID,
+	)
+	return i, err
+}
+
+const lockSteamEvidenceTracking = `-- name: LockSteamEvidenceTracking :exec
+SELECT pg_advisory_xact_lock(170419, 319)
+`
+
+func (q *Queries) LockSteamEvidenceTracking(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, lockSteamEvidenceTracking)
+	return err
+}
+
+const lockSteamEvidenceTrackingShared = `-- name: LockSteamEvidenceTrackingShared :exec
+SELECT pg_advisory_xact_lock_shared(170419, 319)
+`
+
+func (q *Queries) LockSteamEvidenceTrackingShared(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, lockSteamEvidenceTrackingShared)
+	return err
+}
+
+const markSteamEvidenceCapacityLimited = `-- name: MarkSteamEvidenceCapacityLimited :exec
+UPDATE harvest.steam_evidence_staging SET capacity_limited = true,
+    next_check_at = statement_timestamp() + interval '60 seconds'
+WHERE attempt_id = $1
+`
+
+func (q *Queries) MarkSteamEvidenceCapacityLimited(ctx context.Context, attemptID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, markSteamEvidenceCapacityLimited, attemptID)
+	return err
+}
+
 const stageSteamEvidence = `-- name: StageSteamEvidence :exec
 INSERT INTO harvest.steam_evidence_staging (attempt_id, payload_sha256, payload, payload_bytes, observed_at)
 VALUES ($1, $2, $3, octet_length($3::bytea), $4)
@@ -189,6 +400,72 @@ func (q *Queries) StageSteamEvidence(ctx context.Context, arg StageSteamEvidence
 		arg.ObservedAt,
 	)
 	return err
+}
+
+const steamEvidenceAttributionExpiryCandidates = `-- name: SteamEvidenceAttributionExpiryCandidates :many
+SELECT a.attempt_id, a.confirmed_at, (a.attempt_id = e.first_attempt_id OR a.attempt_id = e.last_server_attempt_id) AS pinned
+FROM harvest.steam_evidence_attribution a JOIN harvest.steam_evidence e ON e.id = a.evidence_id
+WHERE a.confirmed_at < $1::timestamptz
+    AND (a.confirmed_at, a.attempt_id) > ($2::timestamptz, $3::uuid)
+ORDER BY a.confirmed_at, a.attempt_id LIMIT $4::integer
+`
+
+type SteamEvidenceAttributionExpiryCandidatesParams struct {
+	Cutoff    time.Time `json:"cutoff"`
+	ScanAt    time.Time `json:"scan_at"`
+	ScanID    uuid.UUID `json:"scan_id"`
+	BatchSize int32     `json:"batch_size"`
+}
+
+type SteamEvidenceAttributionExpiryCandidatesRow struct {
+	AttemptID   uuid.UUID `json:"attempt_id"`
+	ConfirmedAt time.Time `json:"confirmed_at"`
+	Pinned      *bool     `json:"pinned"`
+}
+
+func (q *Queries) SteamEvidenceAttributionExpiryCandidates(ctx context.Context, arg SteamEvidenceAttributionExpiryCandidatesParams) ([]SteamEvidenceAttributionExpiryCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, steamEvidenceAttributionExpiryCandidates,
+		arg.Cutoff,
+		arg.ScanAt,
+		arg.ScanID,
+		arg.BatchSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SteamEvidenceAttributionExpiryCandidatesRow{}
+	for rows.Next() {
+		var i SteamEvidenceAttributionExpiryCandidatesRow
+		if err := rows.Scan(&i.AttemptID, &i.ConfirmedAt, &i.Pinned); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const steamEvidenceBudget = `-- name: SteamEvidenceBudget :one
+SELECT coalesce(sum(logical_bytes) FILTER (WHERE namespace = $1::text), 0)::bigint AS namespace_bytes,
+    coalesce(sum(logical_bytes), 0)::bigint AS global_bytes,
+    coalesce(max(logical_bytes), 0)::bigint AS largest_namespace_bytes
+FROM harvest.steam_evidence_usage
+`
+
+type SteamEvidenceBudgetRow struct {
+	NamespaceBytes        int64 `json:"namespace_bytes"`
+	GlobalBytes           int64 `json:"global_bytes"`
+	LargestNamespaceBytes int64 `json:"largest_namespace_bytes"`
+}
+
+func (q *Queries) SteamEvidenceBudget(ctx context.Context, namespace string) (SteamEvidenceBudgetRow, error) {
+	row := q.db.QueryRow(ctx, steamEvidenceBudget, namespace)
+	var i SteamEvidenceBudgetRow
+	err := row.Scan(&i.NamespaceBytes, &i.GlobalBytes, &i.LargestNamespaceBytes)
+	return i, err
 }
 
 const steamEvidenceCandidates = `-- name: SteamEvidenceCandidates :many
@@ -233,13 +510,259 @@ func (q *Queries) SteamEvidenceCandidates(ctx context.Context) ([]SteamEvidenceC
 	return items, nil
 }
 
-const steamEvidenceStagedAt = `-- name: SteamEvidenceStagedAt :one
-SELECT observed_at FROM harvest.steam_evidence_staging WHERE attempt_id = $1 FOR UPDATE
+const steamEvidenceExpiryCandidates = `-- name: SteamEvidenceExpiryCandidates :many
+SELECT e.id, e.namespace, e.target_id, e.locale, e.store_country, e.egress_region,
+    e.last_server_confirmed_at, NOT EXISTS (
+        SELECT 1 FROM harvest.steam_evidence newer
+        WHERE newer.namespace = e.namespace AND newer.target_id = e.target_id AND newer.capability = e.capability
+            AND newer.locale = e.locale AND newer.store_country = e.store_country AND newer.egress_region = e.egress_region
+            AND (newer.last_server_confirmed_at, newer.last_server_attempt_id) > (e.last_server_confirmed_at, e.last_server_attempt_id)
+    ) AS latest
+FROM harvest.steam_evidence e
+WHERE e.last_server_confirmed_at < $1::timestamptz
+    AND (e.last_server_confirmed_at, e.id) > ($2::timestamptz, $3::uuid)
+ORDER BY e.last_server_confirmed_at, e.id LIMIT $4::integer
 `
 
-func (q *Queries) SteamEvidenceStagedAt(ctx context.Context, attemptID uuid.UUID) (time.Time, error) {
+type SteamEvidenceExpiryCandidatesParams struct {
+	Cutoff    time.Time `json:"cutoff"`
+	ScanAt    time.Time `json:"scan_at"`
+	ScanID    uuid.UUID `json:"scan_id"`
+	BatchSize int32     `json:"batch_size"`
+}
+
+type SteamEvidenceExpiryCandidatesRow struct {
+	ID                    uuid.UUID `json:"id"`
+	Namespace             string    `json:"namespace"`
+	TargetID              uuid.UUID `json:"target_id"`
+	Locale                string    `json:"locale"`
+	StoreCountry          string    `json:"store_country"`
+	EgressRegion          string    `json:"egress_region"`
+	LastServerConfirmedAt time.Time `json:"last_server_confirmed_at"`
+	Latest                bool      `json:"latest"`
+}
+
+func (q *Queries) SteamEvidenceExpiryCandidates(ctx context.Context, arg SteamEvidenceExpiryCandidatesParams) ([]SteamEvidenceExpiryCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, steamEvidenceExpiryCandidates,
+		arg.Cutoff,
+		arg.ScanAt,
+		arg.ScanID,
+		arg.BatchSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SteamEvidenceExpiryCandidatesRow{}
+	for rows.Next() {
+		var i SteamEvidenceExpiryCandidatesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Namespace,
+			&i.TargetID,
+			&i.Locale,
+			&i.StoreCountry,
+			&i.EgressRegion,
+			&i.LastServerConfirmedAt,
+			&i.Latest,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const steamEvidenceGlobalVisible = `-- name: SteamEvidenceGlobalVisible :one
+SELECT NOT EXISTS (
+    SELECT 1 FROM harvest.steam_evidence_usage u WHERE NOT (u.namespace = ANY($1::text[]))
+    UNION ALL
+    SELECT 1 FROM harvest.steam_evidence_staging s
+    JOIN harvest.attempts a ON a.id = s.attempt_id JOIN harvest.jobs j ON j.id = a.job_id
+    WHERE NOT (j.namespace = ANY($1::text[]))
+)
+`
+
+func (q *Queries) SteamEvidenceGlobalVisible(ctx context.Context, namespaces []string) (bool, error) {
+	row := q.db.QueryRow(ctx, steamEvidenceGlobalVisible, namespaces)
+	var not_exists bool
+	err := row.Scan(&not_exists)
+	return not_exists, err
+}
+
+const steamEvidenceRaw = `-- name: SteamEvidenceRaw :one
+SELECT payload FROM harvest.steam_evidence WHERE id = $1
+    AND namespace = ANY($2::text[]) AND capability = 'steam.details'
+`
+
+type SteamEvidenceRawParams struct {
+	ID         uuid.UUID `json:"id"`
+	Namespaces []string  `json:"namespaces"`
+}
+
+func (q *Queries) SteamEvidenceRaw(ctx context.Context, arg SteamEvidenceRawParams) ([]byte, error) {
+	row := q.db.QueryRow(ctx, steamEvidenceRaw, arg.ID, arg.Namespaces)
+	var payload []byte
+	err := row.Scan(&payload)
+	return payload, err
+}
+
+const steamEvidenceScopeVersions = `-- name: SteamEvidenceScopeVersions :many
+SELECT id, payload_bytes, last_server_confirmed_at, last_server_attempt_id
+FROM harvest.steam_evidence
+WHERE namespace = $1 AND target_id = $2 AND capability = 'steam.details'
+    AND locale = $3 AND store_country = $4 AND egress_region = $5
+ORDER BY last_server_confirmed_at DESC, last_server_attempt_id DESC LIMIT 5
+`
+
+type SteamEvidenceScopeVersionsParams struct {
+	Namespace    string    `json:"namespace"`
+	TargetID     uuid.UUID `json:"target_id"`
+	Locale       string    `json:"locale"`
+	StoreCountry string    `json:"store_country"`
+	EgressRegion string    `json:"egress_region"`
+}
+
+type SteamEvidenceScopeVersionsRow struct {
+	ID                    uuid.UUID `json:"id"`
+	PayloadBytes          int32     `json:"payload_bytes"`
+	LastServerConfirmedAt time.Time `json:"last_server_confirmed_at"`
+	LastServerAttemptID   uuid.UUID `json:"last_server_attempt_id"`
+}
+
+func (q *Queries) SteamEvidenceScopeVersions(ctx context.Context, arg SteamEvidenceScopeVersionsParams) ([]SteamEvidenceScopeVersionsRow, error) {
+	rows, err := q.db.Query(ctx, steamEvidenceScopeVersions,
+		arg.Namespace,
+		arg.TargetID,
+		arg.Locale,
+		arg.StoreCountry,
+		arg.EgressRegion,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SteamEvidenceScopeVersionsRow{}
+	for rows.Next() {
+		var i SteamEvidenceScopeVersionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PayloadBytes,
+			&i.LastServerConfirmedAt,
+			&i.LastServerAttemptID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const steamEvidenceStagedAt = `-- name: SteamEvidenceStagedAt :one
+SELECT observed_at, payload_bytes, capacity_limited FROM harvest.steam_evidence_staging WHERE attempt_id = $1 FOR UPDATE
+`
+
+type SteamEvidenceStagedAtRow struct {
+	ObservedAt      time.Time `json:"observed_at"`
+	PayloadBytes    int32     `json:"payload_bytes"`
+	CapacityLimited bool      `json:"capacity_limited"`
+}
+
+func (q *Queries) SteamEvidenceStagedAt(ctx context.Context, attemptID uuid.UUID) (SteamEvidenceStagedAtRow, error) {
 	row := q.db.QueryRow(ctx, steamEvidenceStagedAt, attemptID)
-	var observed_at time.Time
-	err := row.Scan(&observed_at)
-	return observed_at, err
+	var i SteamEvidenceStagedAtRow
+	err := row.Scan(&i.ObservedAt, &i.PayloadBytes, &i.CapacityLimited)
+	return i, err
+}
+
+const steamEvidenceStorage = `-- name: SteamEvidenceStorage :one
+SELECT
+    (SELECT coalesce(sum(u.logical_bytes), 0)::bigint FROM harvest.steam_evidence_usage u
+        WHERE $1::text = '' OR u.namespace = $1::text) AS logical_bytes,
+    (SELECT coalesce(sum(u.versions), 0)::bigint FROM harvest.steam_evidence_usage u
+        WHERE $1::text = '' OR u.namespace = $1::text) AS versions,
+    (SELECT coalesce(sum(u.capacity_limited_attempts), 0)::bigint FROM harvest.steam_evidence_usage u
+        WHERE $1::text = '' OR u.namespace = $1::text) AS capacity_limited_attempts,
+    (SELECT coalesce(sum(pg_column_size(e.payload)), 0)::bigint FROM harvest.steam_evidence e
+        WHERE $1::text = '' OR e.namespace = $1::text) AS payload_column_bytes,
+    (SELECT count(*) FROM harvest.steam_evidence_attribution a JOIN harvest.steam_evidence e ON e.id = a.evidence_id
+        WHERE $1::text = '' OR e.namespace = $1::text) AS attributions,
+    (SELECT count(*) FROM harvest.steam_evidence_staging s
+        JOIN harvest.attempts a ON a.id = s.attempt_id JOIN harvest.jobs j ON j.id = a.job_id
+        WHERE $1::text = '' OR j.namespace = $1::text) AS staging_rows,
+    (SELECT coalesce(sum(s.payload_bytes), 0)::bigint FROM harvest.steam_evidence_staging s
+        JOIN harvest.attempts a ON a.id = s.attempt_id JOIN harvest.jobs j ON j.id = a.job_id
+        WHERE $1::text = '' OR j.namespace = $1::text) AS staging_bytes
+`
+
+type SteamEvidenceStorageRow struct {
+	LogicalBytes            int64 `json:"logical_bytes"`
+	Versions                int64 `json:"versions"`
+	CapacityLimitedAttempts int64 `json:"capacity_limited_attempts"`
+	PayloadColumnBytes      int64 `json:"payload_column_bytes"`
+	Attributions            int64 `json:"attributions"`
+	StagingRows             int64 `json:"staging_rows"`
+	StagingBytes            int64 `json:"staging_bytes"`
+}
+
+func (q *Queries) SteamEvidenceStorage(ctx context.Context, namespace string) (SteamEvidenceStorageRow, error) {
+	row := q.db.QueryRow(ctx, steamEvidenceStorage, namespace)
+	var i SteamEvidenceStorageRow
+	err := row.Scan(
+		&i.LogicalBytes,
+		&i.Versions,
+		&i.CapacityLimitedAttempts,
+		&i.PayloadColumnBytes,
+		&i.Attributions,
+		&i.StagingRows,
+		&i.StagingBytes,
+	)
+	return i, err
+}
+
+const trackedSteamEvidenceIDs = `-- name: TrackedSteamEvidenceIDs :many
+SELECT (c.value->>'id')::uuid AS id FROM jsonb_array_elements($1::jsonb) c
+WHERE EXISTS (
+    SELECT 1 FROM harvest.schedules s JOIN harvest.targets t ON t.id = s.target_id AND t.namespace = s.namespace
+    WHERE s.enabled AND s.capability = 'steam.details' AND s.request_schema = 1 AND s.execution_key = $2::text
+      AND s.target_id = (c.value->>'target_id')::uuid AND s.namespace = c.value->>'namespace'
+      AND t.state = 'active' AND t.provider = 'steam' AND t.resource_type = 'app'
+      AND s.scope->>'locale' = c.value->>'locale' AND upper(s.scope->>'region') = c.value->>'store_country'
+      AND (c.value->'allowed_modes') ? coalesce(s.execution_policy->>'mode', '')
+      AND CASE WHEN coalesce(jsonb_array_length(s.execution_policy->'regions'), 0) > 0
+          THEN (s.execution_policy->'regions') ? (c.value->>'egress_region')
+          ELSE coalesce(nullif(s.scope->>'egress_region', ''), c.value->>'inherited_region') = c.value->>'egress_region'
+      END
+)
+`
+
+type TrackedSteamEvidenceIDsParams struct {
+	Candidates   []byte `json:"candidates"`
+	ExecutionKey string `json:"execution_key"`
+}
+
+func (q *Queries) TrackedSteamEvidenceIDs(ctx context.Context, arg TrackedSteamEvidenceIDsParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, trackedSteamEvidenceIDs, arg.Candidates, arg.ExecutionKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

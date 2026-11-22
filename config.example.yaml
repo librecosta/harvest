@@ -11,6 +11,13 @@ database:
   tls_mode: "verify-full"
   max_connections: 4
 
+steam_evidence:
+  max_versions_per_scope: 5
+  history_days: 90
+  namespace_budget_bytes: 268435456
+  global_budget_bytes: 1073741824
+  prune_batch_size: 32
+
 # Generate distinct URL-safe tokens. Give the Worker only its own token.
 principals:
   - name: "harvest_operator"

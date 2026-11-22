@@ -32,11 +32,16 @@ type Engine struct {
 	quotaBindings    map[string]string
 	policyUncertain  bool
 	retention        config.Retention
+	steamEvidence    config.SteamEvidence
 	consumerPolicies map[string]config.Principal
 	rdap             rdapCache
 }
 
 func New(db *pgxpool.Pool, registry *provider.Registry, principals []config.Principal, retention config.Retention) *Engine {
+	return NewWithSteamEvidence(db, registry, principals, retention, config.DefaultSteamEvidence())
+}
+
+func NewWithSteamEvidence(db *pgxpool.Pool, registry *provider.Registry, principals []config.Principal, retention config.Retention, evidence config.SteamEvidence) *Engine {
 	if retention == (config.Retention{}) {
 		retention = config.DefaultRetention()
 	}
@@ -49,7 +54,10 @@ func New(db *pgxpool.Pool, registry *provider.Registry, principals []config.Prin
 			consumers[p.Name] = config.Principal{Name: p.Name, Role: p.Role, Namespaces: slices.Clone(p.Namespaces), Capabilities: slices.Clone(p.Capabilities)}
 		}
 	}
-	return &Engine{Registry: registry, db: db, queries: q.New(db), workerPolicies: workers, retention: retention, consumerPolicies: consumers}
+	if evidence == (config.SteamEvidence{}) {
+		evidence = config.DefaultSteamEvidence()
+	}
+	return &Engine{Registry: registry, db: db, queries: q.New(db), workerPolicies: workers, retention: retention, steamEvidence: evidence, consumerPolicies: consumers}
 }
 
 func (e *Engine) Drain() {

@@ -101,6 +101,11 @@ func (e *Engine) CreateSchedule(ctx context.Context, p config.Principal, in Sche
 		return q.HarvestSchedule{}, ErrDraining
 	}
 	return tx(ctx, e, func(db *q.Queries) (q.HarvestSchedule, error) {
+		if in.Request.Capability == "steam.details" {
+			if err := db.LockSteamEvidenceTrackingShared(ctx); err != nil {
+				return q.HarvestSchedule{}, err
+			}
+		}
 		w, err := e.resolve(ctx, db, p, in.Request)
 		if err != nil {
 			return q.HarvestSchedule{}, err
@@ -170,6 +175,11 @@ func (e *Engine) EditSchedule(ctx context.Context, p config.Principal, id uuid.U
 		}
 		if s.Revision != patch.Revision {
 			return s, ErrConflict
+		}
+		if s.Capability == "steam.details" || patch.Request != nil && patch.Request.Capability == "steam.details" {
+			if err := db.LockSteamEvidenceTrackingShared(ctx); err != nil {
+				return s, err
+			}
 		}
 		r := recurrence(s)
 		cap, _ := e.Registry.Capability(s.Capability)

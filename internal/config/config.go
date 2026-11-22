@@ -28,6 +28,8 @@ type Config struct {
 	Principals  []Principal `mapstructure:"principals"`
 	LocalWorker *Worker     `mapstructure:"local_worker"`
 	Retention   Retention   `mapstructure:"retention"`
+
+	SteamEvidence SteamEvidence `mapstructure:"steam_evidence"`
 }
 
 type HTTP struct {
@@ -47,18 +49,24 @@ type Database struct {
 func Load(path string) (Config, error) {
 	var cfg Config
 	r := DefaultRetention()
+	s := DefaultSteamEvidence()
 	err := decode(path, &cfg, map[string]any{
-		"http.listen":              "127.0.0.1:8080",
-		"database.port":            5432,
-		"database.tls_mode":        "verify-full",
-		"database.max_connections": 4,
-		"retention.event_days":     r.EventDays,
-		"retention.history_days":   r.HistoryDays,
-		"retention.sample_days":    r.SampleDays,
-		"retention.event_rows":     r.EventRows,
-		"retention.event_bytes":    r.EventBytes,
-		"retention.history_rows":   r.HistoryRows,
-		"retention.history_bytes":  r.HistoryBytes,
+		"http.listen":                           "127.0.0.1:8080",
+		"database.port":                         5432,
+		"database.tls_mode":                     "verify-full",
+		"database.max_connections":              4,
+		"retention.event_days":                  r.EventDays,
+		"retention.history_days":                r.HistoryDays,
+		"retention.sample_days":                 r.SampleDays,
+		"retention.event_rows":                  r.EventRows,
+		"retention.event_bytes":                 r.EventBytes,
+		"retention.history_rows":                r.HistoryRows,
+		"retention.history_bytes":               r.HistoryBytes,
+		"steam_evidence.max_versions_per_scope": s.MaxVersions,
+		"steam_evidence.history_days":           s.HistoryDays,
+		"steam_evidence.namespace_budget_bytes": s.NamespaceBytes,
+		"steam_evidence.global_budget_bytes":    s.GlobalBytes,
+		"steam_evidence.prune_batch_size":       s.PruneBatch,
 	})
 	if err != nil {
 		return cfg, err
@@ -67,6 +75,9 @@ func Load(path string) (Config, error) {
 		return cfg, err
 	}
 	if err := cfg.Retention.validate(); err != nil {
+		return cfg, err
+	}
+	if err := cfg.SteamEvidence.validate(); err != nil {
 		return cfg, err
 	}
 	return cfg, validatePrincipals(cfg)

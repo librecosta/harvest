@@ -44,10 +44,22 @@ func (e *Engine) EditTarget(ctx context.Context, p config.Principal, id uuid.UUI
 	if revision < 1 || (state != "active" && state != "archived") {
 		return q.HarvestTarget{}, ErrInvalid
 	}
-	if _, err := e.Target(ctx, p, id); err != nil {
+	target, err := e.Target(ctx, p, id)
+	if err != nil {
 		return q.HarvestTarget{}, err
 	}
-	value, err := e.queries.UpdateTarget(ctx, q.UpdateTargetParams{ID: id, State: state, ExpectedRevision: revision, Namespaces: p.Namespaces})
+	params := q.UpdateTargetParams{ID: id, State: state, ExpectedRevision: revision, Namespaces: p.Namespaces}
+	var value q.HarvestTarget
+	if target.Provider == "steam" && target.ResourceType == "app" {
+		value, err = tx(ctx, e, func(db *q.Queries) (q.HarvestTarget, error) {
+			if err := db.LockSteamEvidenceTrackingShared(ctx); err != nil {
+				return q.HarvestTarget{}, err
+			}
+			return db.UpdateTarget(ctx, params)
+		})
+	} else {
+		value, err = e.queries.UpdateTarget(ctx, params)
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return value, ErrConflict
 	}

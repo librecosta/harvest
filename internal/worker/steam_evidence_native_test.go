@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/ed25519"
@@ -47,6 +48,7 @@ type steamEvidencePlane struct {
 	pool          *egress.Pool
 	cfg           config.Worker
 	writer, agent config.Principal
+	operator      config.Principal
 	workerID      uuid.UUID
 	body          atomic.Pointer[[]byte]
 	requests      atomic.Int32
@@ -89,18 +91,26 @@ func newSteamEvidencePlane(t *testing.T) *steamEvidencePlane {
 		Capabilities: []string{capability}, EgressProfiles: []string{profile}, MaxSlots: 1}
 	foreign := s.agent
 	foreign.Name, foreign.Token, foreign.Namespaces = "foreign", strings.Repeat("c", 40), []string{"foreign"}
-	people := []config.Principal{s.writer, s.agent, foreign}
+	s.operator = config.Principal{Name: "operator", Role: "operator", Token: strings.Repeat("d", 40), Namespaces: namespaces}
+	limited := config.Principal{Name: "limited", Role: "operator", Token: strings.Repeat("e", 40), Namespaces: namespaces[:1]}
+	wrongCapability := config.Principal{Name: "wrong_capability", Role: "operator", Token: strings.Repeat("f", 40),
+		Namespaces: namespaces, Capabilities: []string{"steam.news"}}
+	reader := config.Principal{Name: "reader", Role: "reader", Token: strings.Repeat("g", 40), Namespaces: namespaces}
+	people := []config.Principal{s.writer, s.agent, foreign, s.operator, limited, wrongCapability, reader}
 	s.engine = execution.New(db, s.registry, people, config.Retention{})
 	netPolicy := egress.NetworkConfig{GlobalBucket: "global",
-		Routes: []egress.RouteConfig{{Profile: profile, Mode: egress.Direct,
-			Paths: []egress.PathConfig{{ID: egress.Direct, Kind: egress.Direct, Region: "cn", Bucket: "line"}}}},
+		Routes: []egress.RouteConfig{{Profile: profile, Mode: egress.PreferProxy, AllowDirect: true,
+			Paths: []egress.PathConfig{
+				{ID: egress.Direct, Kind: egress.Direct, Region: "cn", Bucket: "line"},
+				{ID: "edge", Kind: "socks5", Region: "intl", Bucket: "proxy"},
+			}}},
 	}
 	for _, namespace := range namespaces {
 		netPolicy.Sources = append(netPolicy.Sources, egress.SourceConfig{Capability: capability, Namespace: namespace,
 			Profile: profile, ProviderBucket: "provider", AccountBucket: "account"})
 	}
-	for _, bucket := range []string{"global", "line", "provider", "account"} {
-		netPolicy.Quotas = append(netPolicy.Quotas, egress.QuotaConfig{ID: bucket, Burst: 30, PerMinute: 30, Concurrency: 1})
+	for _, bucket := range []string{"global", "line", "provider", "account", "proxy"} {
+		netPolicy.Quotas = append(netPolicy.Quotas, egress.QuotaConfig{ID: bucket, Burst: 64, PerMinute: 60, Concurrency: 1})
 	}
 	if err := s.engine.InitNetworkPolicy(t.Context(), netPolicy); err != nil {
 		t.Fatal(err)
@@ -126,12 +136,12 @@ func newSteamEvidencePlane(t *testing.T) *steamEvidencePlane {
 	})
 	s.cfg = config.Worker{ControlURL: "http://" + listener.Addr().String(), Token: s.agent.Token, Offers: []provider.Offer{offer.Offer},
 		Concurrency: 1, EgressProfiles: []string{profile}, SteamEvidenceAppIDs: []int64{440},
-		Egress: egress.Config{Profiles: []egress.ProfileConfig{{Name: profile, Mode: egress.Direct, DirectRegion: "cn"}}}}
+		Egress: egress.Config{Profiles: []egress.ProfileConfig{{Name: profile, Mode: egress.PreferProxy, AllowDirect: true, DirectRegion: "cn"}}}}
 	s.pool = egress.NewPool(s.cfg.Egress)
 	t.Cleanup(s.pool.Close)
 	s.api = newClient(s.cfg)
-	t.Cleanup(s.api.http.CloseIdleConnections)
-	original := s.api.http.Transport
+	original := s.api.http.Transport.(*http.Transport)
+	t.Cleanup(original.CloseIdleConnections)
 	s.api.http.Transport = evidenceRoundTrip(func(req *http.Request) (*http.Response, error) {
 		started := time.Now()
 		response, err := original.RoundTrip(req)
@@ -288,6 +298,12 @@ func TestSteamEvidenceNative(t *testing.T) {
 	if s.lost.Load() || s.count(staged, first.AttemptID) != 1 || s.count(attributed, first.AttemptID) != 0 {
 		t.Fatal("lost upload response did not leave exactly one staged record")
 	}
+	var pending evidenceList
+	s.evidenceGET(evidenceURL+"?namespace=evidence_one", s.operator.Token, 200, &pending)
+	if len(pending.Items) != 0 {
+		t.Fatal("staging appeared in the archive list")
+	}
+	s.evidenceGET(evidenceURL+"/"+first.AttemptID.String()+"/raw", s.operator.Token, 404, nil)
 	s.sql(`CREATE FUNCTION reject_evidence_fixture() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN RAISE EXCEPTION 'fixture archive failure'; END; $$;
 CREATE TRIGGER reject_evidence_fixture BEFORE INSERT ON harvest.steam_evidence_attribution
@@ -369,20 +385,32 @@ AND locale=$3 AND store_country=$4 AND egress_region=$5 AND payload_sha256=$6 AN
 			s.count("SELECT pg_column_size(payload) FROM harvest.steam_evidence WHERE first_attempt_id=$1", claim.AttemptID))
 	}
 
+	s.testEvidenceAccess(firstID, a)
+	var oldID uuid.UUID
+	if err := s.db.QueryRow(t.Context(), "SELECT id FROM harvest.steam_evidence WHERE namespace='evidence_one' AND payload_sha256=$1", shaSlice(b)).Scan(&oldID); err != nil {
+		t.Fatal(err)
+	}
+	var versions []execution.Claim
 	for i := range 4 {
 		claim, start := s.claim("evidence_one", "english", "US")
 		s.run(claim, start, evidenceFixture(4<<10, "Fixture", fmt.Sprintf("<p>version %d</p>", i)), true)
-		s.recover()
-		expected := 1
-		if i == 3 {
-			expected = 0
-		}
-		if s.count(attributed, claim.AttemptID) != expected || s.count(staged, claim.AttemptID) != 0 {
-			t.Fatal("temporary scope capacity did not control new evidence versions")
+		versions = append(versions, claim)
+	}
+	s.recoverConcurrently(s.engine)
+	for _, claim := range versions {
+		if s.count(attributed, claim.AttemptID) != 1 || s.count(staged, claim.AttemptID) != 0 {
+			t.Fatal("the sixth distinct body did not rotate in")
 		}
 	}
+	if s.count("SELECT count(*) FROM harvest.steam_evidence WHERE namespace='evidence_one' AND locale='en' AND store_country='US' AND egress_region='cn'") != 5 ||
+		s.count("SELECT count(*) FROM harvest.steam_evidence_attribution WHERE evidence_id=$1", oldID) != 0 {
+		t.Fatal("rotation did not retain five versions and remove the oldest lineage")
+	}
+	s.evidenceGET(evidenceURL+"/"+oldID.String()+"/raw", s.operator.Token, 404, nil)
 	s.testOutOfOrderArchive(a)
 	s.testCompletionFailure(a)
+	s.testTrackedRetention(firstID, a)
+	s.testArchiveBudgets()
 	s.testEvidenceRejections(a, b)
 }
 
@@ -481,7 +509,7 @@ func (s *steamEvidencePlane) testEvidenceRejections(a, b []byte) {
 	} {
 		check(s.api, fence, a, 404)
 	}
-	check(s.api, claim.Fence, append(bytes.Clone(a), bytes.Repeat([]byte(" "), provider.MaxSteamEvidenceBytes)...), 413)
+	s.testEvidenceIngressLimit(path)
 	check(s.api, claim.Fence, bytes.Replace(a, []byte("440"), []byte("441"), 1), 400)
 	check(s.api, claim.Fence, a, 204)
 	check(s.api, claim.Fence, a, 204)
@@ -496,5 +524,33 @@ func (s *steamEvidencePlane) testEvidenceRejections(a, b []byte) {
 	s.recover()
 	if s.count("SELECT count(*) FROM harvest.steam_evidence_staging WHERE attempt_id=$1", claim.AttemptID) != 0 {
 		t.Fatal("expired staging was retained")
+	}
+}
+
+func (s *steamEvidencePlane) testEvidenceIngressLimit(path string) {
+	t := s.t
+	t.Helper()
+	address := strings.TrimPrefix(s.cfg.ControlURL, "http://")
+	conn, err := net.DialTimeout("tcp", address, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := conn.SetDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	// Send only the oversized Content-Length. The server must reject it
+	// before reading the body, avoiding a client write/close race.
+	if _, err := fmt.Fprintf(conn, "POST /internal/v1%s HTTP/1.1\r\nHost: %s\r\nContent-Length: %d\r\n\r\n",
+		path, address, provider.MaxSteamEvidenceBytes+1); err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: http.MethodPost})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected HTTP 413 before upload, got %d", response.StatusCode)
 	}
 }

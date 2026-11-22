@@ -141,6 +141,8 @@ func (e *Engine) RecoverSteamEvidence(ctx context.Context, logger *slog.Logger) 
 }
 
 func (e *Engine) archiveSteamEvidence(ctx context.Context, row q.SteamEvidenceCandidatesRow) (string, error) {
+	e.admission.RLock()
+	defer e.admission.RUnlock()
 	return tx(ctx, e, func(db *q.Queries) (string, error) {
 		job, err := db.LockJob(ctx, q.LockJobParams{ID: row.JobID, Namespaces: []string{row.Namespace}})
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -153,7 +155,7 @@ func (e *Engine) archiveSteamEvidence(ctx context.Context, row q.SteamEvidenceCa
 		if err != nil {
 			return "", err
 		}
-		observed, err := db.SteamEvidenceStagedAt(ctx, row.AttemptID)
+		staged, err := db.SteamEvidenceStagedAt(ctx, row.AttemptID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", nil
 		}
@@ -172,32 +174,30 @@ func (e *Engine) archiveSteamEvidence(ctx context.Context, row q.SteamEvidenceCa
 		if err != nil {
 			return "", err
 		}
-		// Different Jobs for the same Target can complete concurrently. Serialize
-		// scope admission here with an archive-only key after locking the Job.
-		if err := db.LockObservationTarget(ctx, "steam-evidence/"+task.TargetID.String()); err != nil {
+		// Evidence lock order is Job, staging, maintenance, then archive rows.
+		// Background pruning starts at maintenance and never locks a Job.
+		state, err := db.LockSteamEvidenceMaintenance(ctx)
+		if err != nil {
 			return "", err
 		}
 		scope := q.ConfirmSteamEvidenceParams{
 			AttemptID: a.ID, Namespace: task.Namespace, TargetID: task.TargetID, Locale: task.Scope.Locale,
 			StoreCountry: strings.ToUpper(task.Scope.Region), EgressRegion: strings.ToLower(*a.EgressRegion),
+			ConfirmedAt: *a.EndedAt,
 		}
 		id, err := db.ConfirmSteamEvidence(ctx, scope)
 		outcome := "reused"
 		if errors.Is(err, pgx.ErrNoRows) {
-			outcome = "stored"
-			id, err = db.ArchiveSteamEvidence(ctx, q.ArchiveSteamEvidenceParams{
-				ID: uuid.NewV7(), Namespace: scope.Namespace, TargetID: scope.TargetID, Locale: scope.Locale,
-				StoreCountry: scope.StoreCountry, EgressRegion: scope.EgressRegion, JobID: job.ID, AttemptID: a.ID,
-			})
-			if errors.Is(err, pgx.ErrNoRows) {
-				return "scope_capacity_reached", db.DeleteStagedSteamEvidence(ctx, a.ID)
+			id, outcome, err = e.admitSteamEvidence(ctx, db, state, scope, staged, job.ID)
+			if err == nil && id == uuid.Nil() {
+				return outcome, nil
 			}
 		}
 		if err != nil {
 			return "", err
 		}
 		if err := db.AttributeSteamEvidence(ctx, q.AttributeSteamEvidenceParams{
-			AttemptID: a.ID, JobID: job.ID, EvidenceID: id, ObservedAt: observed, ConfirmedAt: *a.EndedAt,
+			AttemptID: a.ID, JobID: job.ID, EvidenceID: id, ObservedAt: staged.ObservedAt, ConfirmedAt: *a.EndedAt,
 		}); err != nil {
 			return "", err
 		}

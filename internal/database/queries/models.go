@@ -223,21 +223,24 @@ type HarvestSchedule struct {
 }
 
 type HarvestSteamEvidence struct {
-	ID              uuid.UUID `json:"id"`
-	Namespace       string    `json:"namespace"`
-	TargetID        uuid.UUID `json:"target_id"`
-	Capability      string    `json:"capability"`
-	Locale          string    `json:"locale"`
-	StoreCountry    string    `json:"store_country"`
-	EgressRegion    string    `json:"egress_region"`
-	PayloadSha256   []byte    `json:"payload_sha256"`
-	Payload         []byte    `json:"payload"`
-	PayloadBytes    int32     `json:"payload_bytes"`
-	FirstObservedAt time.Time `json:"first_observed_at"`
-	LastConfirmedAt time.Time `json:"last_confirmed_at"`
-	FirstJobID      uuid.UUID `json:"first_job_id"`
-	FirstAttemptID  uuid.UUID `json:"first_attempt_id"`
-	FormatVersion   int32     `json:"format_version"`
+	ID                    uuid.UUID  `json:"id"`
+	Namespace             string     `json:"namespace"`
+	TargetID              uuid.UUID  `json:"target_id"`
+	Capability            string     `json:"capability"`
+	Locale                string     `json:"locale"`
+	StoreCountry          string     `json:"store_country"`
+	EgressRegion          string     `json:"egress_region"`
+	PayloadSha256         []byte     `json:"payload_sha256"`
+	Payload               []byte     `json:"payload"`
+	PayloadBytes          int32      `json:"payload_bytes"`
+	FirstObservedAt       time.Time  `json:"first_observed_at"`
+	LastConfirmedAt       time.Time  `json:"last_confirmed_at"`
+	FirstJobID            uuid.UUID  `json:"first_job_id"`
+	FirstAttemptID        uuid.UUID  `json:"first_attempt_id"`
+	FormatVersion         int32      `json:"format_version"`
+	LastServerConfirmedAt time.Time  `json:"last_server_confirmed_at"`
+	LastServerAttemptID   uuid.UUID  `json:"last_server_attempt_id"`
+	ArchivedAt            *time.Time `json:"archived_at"`
 }
 
 type HarvestSteamEvidenceAttribution struct {
@@ -248,14 +251,30 @@ type HarvestSteamEvidenceAttribution struct {
 	ConfirmedAt time.Time `json:"confirmed_at"`
 }
 
+type HarvestSteamEvidenceMaintenance struct {
+	Singleton         bool      `json:"singleton"`
+	VersionScanAt     time.Time `json:"version_scan_at"`
+	VersionScanID     uuid.UUID `json:"version_scan_id"`
+	AttributionScanAt time.Time `json:"attribution_scan_at"`
+	AttributionScanID uuid.UUID `json:"attribution_scan_id"`
+}
+
 type HarvestSteamEvidenceStaging struct {
-	AttemptID     uuid.UUID `json:"attempt_id"`
-	PayloadSha256 []byte    `json:"payload_sha256"`
-	Payload       []byte    `json:"payload"`
-	PayloadBytes  int32     `json:"payload_bytes"`
-	ObservedAt    time.Time `json:"observed_at"`
-	UploadedAt    time.Time `json:"uploaded_at"`
-	NextCheckAt   time.Time `json:"next_check_at"`
+	AttemptID       uuid.UUID `json:"attempt_id"`
+	PayloadSha256   []byte    `json:"payload_sha256"`
+	Payload         []byte    `json:"payload"`
+	PayloadBytes    int32     `json:"payload_bytes"`
+	ObservedAt      time.Time `json:"observed_at"`
+	UploadedAt      time.Time `json:"uploaded_at"`
+	NextCheckAt     time.Time `json:"next_check_at"`
+	CapacityLimited bool      `json:"capacity_limited"`
+}
+
+type HarvestSteamEvidenceUsage struct {
+	Namespace               string `json:"namespace"`
+	LogicalBytes            int64  `json:"logical_bytes"`
+	Versions                int64  `json:"versions"`
+	CapacityLimitedAttempts int64  `json:"capacity_limited_attempts"`
 }
 
 type HarvestSubmission struct {

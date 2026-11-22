@@ -62,7 +62,7 @@ func Run(ctx context.Context, cfg config.Config, registry *provider.Registry, lo
 		}
 		return err
 	}
-	engine := execution.New(pool, registry, cfg.Principals, cfg.Retention)
+	engine := execution.NewWithSteamEvidence(pool, registry, cfg.Principals, cfg.Retention, cfg.SteamEvidence)
 	check, cancel = context.WithTimeout(ctx, 3*time.Second)
 	err = engine.LoadNetworkPolicy(check)
 	cancel()
@@ -267,6 +267,15 @@ func maintain(ctx context.Context, engine *execution.Engine, logger *slog.Logger
 			cancel()
 			if err != nil && ctx.Err() == nil {
 				logger.Warn("execution history pruning unavailable")
+			}
+			run, cancel = context.WithTimeout(ctx, 2*time.Second)
+			evidence, err := engine.PruneSteamEvidence(run)
+			cancel()
+			if err != nil && ctx.Err() == nil {
+				logger.Warn("Steam evidence pruning unavailable")
+			} else if evidence.VersionsRemoved != 0 || evidence.AttributionsRemoved != 0 || evidence.OverBudget {
+				logger.Info("Steam evidence maintenance", "versions_removed", evidence.VersionsRemoved,
+					"attributions_removed", evidence.AttributionsRemoved, "logical_bytes", evidence.GlobalBytes, "over_budget", evidence.OverBudget)
 			}
 		}
 	}
