@@ -70,6 +70,7 @@ SELECT w.id, w.principal, w.node_id, w.offers, w.network_paths, w.capacity,
        (SELECT count(*) FROM harvest.attempts a WHERE a.worker_id = w.id AND a.state = 'running'
         AND a.lease_until > statement_timestamp()) AS active_tasks
 FROM harvest.workers w LEFT JOIN harvest.worker_nodes n ON n.current_worker_id = w.id
-WHERE w.principal = ANY(sqlc.arg(principals)::text[]) AND (w.node_id IS NULL OR n.node_id IS NOT NULL)
+WHERE w.principal = ANY(sqlc.arg(principals)::text[])
+  AND (n.node_id IS NOT NULL OR (w.node_id IS NULL AND w.last_seen > statement_timestamp()-interval '30 seconds'))
 ORDER BY (w.last_seen > statement_timestamp()-interval '30 seconds') DESC, w.last_seen DESC, w.id
 LIMIT 201;

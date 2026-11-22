@@ -91,7 +91,17 @@ func TestEgressPolicyNative(t *testing.T) {
 	proxy := egress.Advertisement{Profile: "overseas", Mode: egress.RequireProxy, ID: "edge", Kind: "http", Region: "intl", State: "healthy", Capacity: 2}
 	call("POST", "/internal/v1/workers/register", worker.Token, execution.Registration{ID: id, NodeID: "shared-worker",
 		Offers: []provider.Offer{compiled.Offer}, Paths: []egress.Advertisement{direct, proxy}, Capacity: 2}, nil, 204)
+	legacyID := uuid.NewV7()
+	call("POST", "/internal/v1/workers/register", worker.Token, execution.Registration{ID: legacyID,
+		Offers: []provider.Offer{compiled.Offer}, Paths: []egress.Advertisement{direct, proxy}, Capacity: 2}, nil, 204)
 	var view execution.EgressPolicyView
+	call("GET", base+namespace, reader.Token, nil, &view, 200)
+	if len(view.Rules) != 1 || len(view.Rules[0].Workers) != 2 {
+		t.Fatalf("online legacy worker missing from policy: %+v", view)
+	}
+	if _, err := pool.Exec(t.Context(), "UPDATE harvest.workers SET last_seen=clock_timestamp()-interval '1 minute' WHERE id=$1", legacyID); err != nil {
+		t.Fatal(err)
+	}
 	call("GET", base+namespace, reader.Token, nil, &view, 200)
 	if view.CanEdit || len(view.Rules) != 1 || len(view.Rules[0].Options) != 2 || len(view.Rules[0].Workers) != 1 ||
 		!view.Rules[0].Workers[0].Shared || view.Rules[0].Workers[0].RuntimeID != nil || len(view.Rules[0].Workers[0].Paths) != 0 {
