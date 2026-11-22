@@ -251,6 +251,15 @@ func execute(ctx context.Context, api client, registry *provider.Registry, pool 
 		case outcome := <-completed:
 			cancelWork()
 			completed, workDone = nil, nil
+			if proof := outcome.StoreBrowse; proof != nil {
+				logger.Info("Steam StoreBrowse response", "job_id", claim.JobID.String(), "attempt_id", claim.AttemptID.String(),
+					"http_status", proof.HTTPStatus, "response_bytes", proof.ResponseBytes, "elapsed_ms", proof.Elapsed.Milliseconds(),
+					"store_items", proof.StoreItems, "item_count", proof.ItemCount, "matching_app", proof.MatchingApp,
+					"item_type_app", proof.Application, "steam_success", proof.Success, "visible", proof.Visible,
+					"assets_present", proof.AssetsPresent, "asset_count", proof.AssetCount, "segment_bytes", proof.SegmentBytes,
+					"library_logo_slots", proof.LibraryLogoSlots,
+					"result_code", outcome.Code)
+			}
 			if policyChanged.Load() {
 				outcome = provider.Result{State: "failed", Code: "network_policy_changed"}
 			}

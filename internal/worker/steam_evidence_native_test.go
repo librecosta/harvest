@@ -53,12 +53,17 @@ type steamEvidencePlane struct {
 	workerID      uuid.UUID
 	body          atomic.Pointer[[]byte]
 	requests      atomic.Int32
+	browseStatus  atomic.Int32
 	log           *slog.Logger
 	lost          atomic.Bool
 	completion    execution.Completion
 }
 
 func newSteamEvidencePlane(t *testing.T, previewNamespaces ...string) *steamEvidencePlane {
+	return newSteamTestPlane(t, previewNamespaces, nil)
+}
+
+func newSteamTestPlane(t *testing.T, previewNamespaces, assetsNamespaces []string) *steamEvidencePlane {
 	t.Helper()
 	path := os.Getenv("HARVEST_NATIVE_EVIDENCE_DB_CONFIG")
 	if path == "" {
@@ -90,6 +95,9 @@ func newSteamEvidencePlane(t *testing.T, previewNamespaces ...string) *steamEvid
 	s.writer = config.Principal{Name: "writer", Role: "writer", Token: strings.Repeat("a", 40), Namespaces: namespaces}
 	s.agent = config.Principal{Name: "worker", Role: "worker", Token: strings.Repeat("b", 40), Namespaces: namespaces,
 		Capabilities: []string{capability}, EgressProfiles: []string{profile}, MaxSlots: 1}
+	if len(assetsNamespaces) != 0 {
+		s.agent.Capabilities = append(s.agent.Capabilities, provider.SteamAssets, "steam.news")
+	}
 	foreign := s.agent
 	foreign.Name, foreign.Token, foreign.Namespaces = "foreign", strings.Repeat("c", 40), []string{"foreign"}
 	s.operator = config.Principal{Name: "operator", Role: "operator", Token: strings.Repeat("d", 40), Namespaces: namespaces}
@@ -100,7 +108,7 @@ func newSteamEvidencePlane(t *testing.T, previewNamespaces ...string) *steamEvid
 	legacyReader := config.Principal{Name: "legacy_reader", Role: "reader", Token: strings.Repeat("h", 40), Namespaces: namespaces[:1]}
 	people := []config.Principal{s.writer, s.agent, foreign, s.operator, limited, wrongCapability, reader, legacyReader}
 	s.principals = people
-	s.engine = execution.NewConfigured(db, s.registry, config.Config{Principals: people, SteamMediaV2Namespaces: previewNamespaces})
+	s.engine = execution.NewConfigured(db, s.registry, config.Config{Principals: people, SteamMediaV2Namespaces: previewNamespaces, SteamAssetsNamespaces: assetsNamespaces})
 	netPolicy := egress.NetworkConfig{GlobalBucket: "global",
 		Routes: []egress.RouteConfig{{Profile: profile, Mode: egress.PreferProxy, AllowDirect: true,
 			Paths: []egress.PathConfig{
@@ -114,6 +122,16 @@ func newSteamEvidencePlane(t *testing.T, previewNamespaces ...string) *steamEvid
 	}
 	for _, bucket := range []string{"global", "line", "provider", "account", "proxy"} {
 		netPolicy.Quotas = append(netPolicy.Quotas, egress.QuotaConfig{ID: bucket, Burst: 64, PerMinute: 60, Concurrency: 1})
+	}
+	for _, namespace := range assetsNamespaces {
+		for _, name := range []string{provider.SteamAssets, "steam.news"} {
+			netPolicy.Sources = append(netPolicy.Sources, egress.SourceConfig{Capability: name, Namespace: namespace, Profile: profile,
+				ProviderBucket: "official", AccountBucket: "official_account"})
+		}
+	}
+	if len(assetsNamespaces) != 0 {
+		netPolicy.Quotas = append(netPolicy.Quotas, egress.QuotaConfig{ID: "official", Burst: 64, PerMinute: 60, Concurrency: 1},
+			egress.QuotaConfig{ID: "official_account", Burst: 64, PerMinute: 60, Concurrency: 1, DailyLimit: 100})
 	}
 	if err := s.engine.InitNetworkPolicy(t.Context(), netPolicy); err != nil {
 		t.Fatal(err)
@@ -188,7 +206,7 @@ func (s *steamEvidencePlane) steamFixture() *egress.FixtureNetwork {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	cert := &x509.Certificate{SerialNumber: big.NewInt(1), DNSNames: []string{"store.steampowered.com"},
+	cert := &x509.Certificate{SerialNumber: big.NewInt(1), DNSNames: []string{"store.steampowered.com", "api.steampowered.com"},
 		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
 	der, err := x509.CreateCertificate(rand.Reader, cert, cert, pub, key)
@@ -203,10 +221,19 @@ func (s *steamEvidencePlane) steamFixture() *egress.FixtureNetwork {
 	roots.AddCert(leaf)
 	upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.requests.Add(1)
-		if r.Method != "GET" || r.Host != "store.steampowered.com" || r.URL.Path != "/api/appdetails" || r.URL.Query().Get("appids") != "440" {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Host == "api.steampowered.com" {
+			if r.Method != "GET" || r.URL.Path != "/IStoreBrowseService/GetItems/v1/" ||
+				len(r.URL.Query()) != 1 || !strings.Contains(r.URL.Query().Get("input_json"), `"ids":[{"appid":440}]`) ||
+				!strings.Contains(r.URL.Query().Get("input_json"), `"include_assets":true`) || r.Header.Get("X-WebAPI-Key") != "" {
+				t.Error("unexpected StoreBrowse request")
+			}
+			if status := s.browseStatus.Load(); status != 0 {
+				w.WriteHeader(int(status))
+			}
+		} else if r.Method != "GET" || r.Host != "store.steampowered.com" || r.URL.Path != "/api/appdetails" || r.URL.Query().Get("appids") != "440" {
 			t.Error("unexpected Storefront request")
 		}
-		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(*s.body.Load())
 	}))
 	upstream.TLS = &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}}}

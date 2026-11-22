@@ -58,6 +58,7 @@ JOIN harvest.targets t ON t.id = s.target_id
 WHERE s.enabled AND s.next_due_at <= statement_timestamp() AND t.state = 'active'
   AND s.execution_key = ANY(sqlc.arg(offers)::text[])
   AND (s.execution_key <> sqlc.arg(pilot_offer)::text OR s.namespace = ANY(sqlc.arg(pilot_namespaces)::text[]))
+  AND (s.execution_key <> sqlc.arg(assets_offer)::text OR s.namespace = ANY(sqlc.arg(assets_namespaces)::text[]))
 ORDER BY s.next_due_at, s.id LIMIT 1 FOR UPDATE OF s SKIP LOCKED;
 
 -- name: AdvanceSchedule :exec

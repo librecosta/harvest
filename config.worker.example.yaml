@@ -17,6 +17,8 @@ offers:
   - {capability: "steam.details", request_schema: 1, output_schema: 1, implementation: "steam_v1"}
   # Optional after upgrading the Server and configuring a dedicated pilot namespace.
   # - {capability: "steam.details", request_schema: 1, output_schema: 2, implementation: "steam_v2"}
+  # Enable with an explicit steam.assets namespace grant and StoreBrowse policy.
+  # - {capability: "steam.assets", request_schema: 1, output_schema: 1, implementation: "steam_assets_v1"}
   - {capability: "steam.news", request_schema: 1, output_schema: 1, implementation: "steam_v1"}
   - {capability: "steam.players", request_schema: 1, output_schema: 1, implementation: "steam_v1"}
 

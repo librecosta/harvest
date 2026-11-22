@@ -74,7 +74,8 @@ type Result struct {
 	Data     jsontext.Value `json:"data,omitempty"`
 	Segments []Segment      `json:"segments,omitempty"`
 
-	SteamEvidence *SteamEvidence `json:"-"`
+	SteamEvidence *SteamEvidence    `json:"-"`
+	StoreBrowse   *StoreBrowseProof `json:"-"`
 }
 
 type Resource struct {

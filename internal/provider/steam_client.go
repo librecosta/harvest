@@ -21,10 +21,14 @@ type steamTransport struct {
 	store    *map[string]steamStorePresence
 	validate func([]byte) bool
 	evidence *SteamEvidence
+	status   *int
 }
 
 func (t steamTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	res, err := t.client.Do(r)
+	if res != nil && t.status != nil {
+		*t.status = res.StatusCode
+	}
 	if err != nil || res.StatusCode != http.StatusOK {
 		return res, err
 	}

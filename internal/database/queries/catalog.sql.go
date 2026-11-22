@@ -217,17 +217,26 @@ JOIN harvest.targets t ON t.id = s.target_id
 WHERE s.enabled AND s.next_due_at <= statement_timestamp() AND t.state = 'active'
   AND s.execution_key = ANY($1::text[])
   AND (s.execution_key <> $2::text OR s.namespace = ANY($3::text[]))
+  AND (s.execution_key <> $4::text OR s.namespace = ANY($5::text[]))
 ORDER BY s.next_due_at, s.id LIMIT 1 FOR UPDATE OF s SKIP LOCKED
 `
 
 type LockDueScheduleParams struct {
-	Offers          []string `json:"offers"`
-	PilotOffer      string   `json:"pilot_offer"`
-	PilotNamespaces []string `json:"pilot_namespaces"`
+	Offers           []string `json:"offers"`
+	PilotOffer       string   `json:"pilot_offer"`
+	PilotNamespaces  []string `json:"pilot_namespaces"`
+	AssetsOffer      string   `json:"assets_offer"`
+	AssetsNamespaces []string `json:"assets_namespaces"`
 }
 
 func (q *Queries) LockDueSchedule(ctx context.Context, arg LockDueScheduleParams) (HarvestSchedule, error) {
-	row := q.db.QueryRow(ctx, lockDueSchedule, arg.Offers, arg.PilotOffer, arg.PilotNamespaces)
+	row := q.db.QueryRow(ctx, lockDueSchedule,
+		arg.Offers,
+		arg.PilotOffer,
+		arg.PilotNamespaces,
+		arg.AssetsOffer,
+		arg.AssetsNamespaces,
+	)
 	var i HarvestSchedule
 	err := row.Scan(
 		&i.ID,

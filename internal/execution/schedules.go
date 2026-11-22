@@ -260,6 +260,7 @@ func (e *Engine) reconcileOne(ctx context.Context, offers []string) (bool, error
 	return tx(ctx, e, func(db *q.Queries) (bool, error) {
 		s, err := db.LockDueSchedule(ctx, q.LockDueScheduleParams{
 			Offers: offers, PilotOffer: provider.SteamMediaV2Key, PilotNamespaces: e.steamMediaV2Namespaces,
+			AssetsOffer: provider.SteamAssetsKey, AssetsNamespaces: e.steamAssetsNamespaces,
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, nil

@@ -20,6 +20,8 @@ steam_evidence:
 
 # Allow explicit steam.details Output Schema 2 only in dedicated pilot namespaces.
 steam_media_preview_namespaces: []
+# Allow StoreBrowse jobs only in dedicated pilot namespaces.
+steam_assets_preview_namespaces: []
 
 # Generate distinct URL-safe tokens. Give the Worker only its own token.
 principals:

@@ -34,6 +34,7 @@ type Engine struct {
 	retention              config.Retention
 	steamEvidence          config.SteamEvidence
 	steamMediaV2Namespaces []string
+	steamAssetsNamespaces  []string
 	consumerPolicies       map[string]config.Principal
 	rdap                   rdapCache
 }
@@ -64,11 +65,19 @@ func NewConfigured(db *pgxpool.Pool, registry *provider.Registry, cfg config.Con
 		evidence = config.DefaultSteamEvidence()
 	}
 	return &Engine{Registry: registry, db: db, queries: q.New(db), workerPolicies: workers, retention: retention, steamEvidence: evidence,
-		steamMediaV2Namespaces: slices.Clone(cfg.SteamMediaV2Namespaces), consumerPolicies: consumers}
+		steamMediaV2Namespaces: slices.Clone(cfg.SteamMediaV2Namespaces), steamAssetsNamespaces: slices.Clone(cfg.SteamAssetsNamespaces),
+		consumerPolicies: consumers}
 }
 
 func (e *Engine) offerEnabled(key, namespace string) bool {
-	return key != provider.SteamMediaV2Key || slices.Contains(e.steamMediaV2Namespaces, namespace)
+	switch key {
+	case provider.SteamMediaV2Key:
+		return slices.Contains(e.steamMediaV2Namespaces, namespace)
+	case provider.SteamAssetsKey:
+		return slices.Contains(e.steamAssetsNamespaces, namespace)
+	default:
+		return true
+	}
 }
 
 func (e *Engine) Drain() {
