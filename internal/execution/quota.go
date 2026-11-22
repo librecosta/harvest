@@ -58,8 +58,8 @@ func (e *Engine) Permit(ctx context.Context, p config.Principal, id uuid.UUID, i
 		if job.State == "cancel_requested" {
 			return egress.Grant{}, ErrCancelled
 		}
-		cap, ok := e.Registry.Capability(job.Capability)
-		if !ok || cap.Execute == nil || cap.Key() != job.ExecutionKey || cap.Network == nil || !slices.Contains(worker.Offers, job.ExecutionKey) {
+		cap, ok := e.Registry.CapabilityByKey(job.ExecutionKey)
+		if !ok || cap.Execute == nil || cap.Capability != job.Capability || cap.Network == nil || !slices.Contains(worker.Offers, job.ExecutionKey) {
 			return egress.Grant{}, ErrForbidden
 		}
 		now, err := db.DBNow(ctx)

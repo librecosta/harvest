@@ -85,8 +85,8 @@ func (e *Engine) resolve(ctx context.Context, db *q.Queries, p config.Principal,
 	if !canCapability(p, in.Capability) {
 		return work{}, ErrForbidden
 	}
-	cap, ok := e.Registry.Capability(in.Capability)
-	if !ok || cap.RequestSchema != in.RequestSchema || cap.Resource != target.ResourceType ||
+	cap, ok := e.Registry.SelectCapability(in.Capability, in.RequestSchema, in.OutputSchema)
+	if !ok || cap.Resource != target.ResourceType ||
 		!strings.HasPrefix(cap.Capability, target.Provider+".") {
 		return work{}, ErrInvalid
 	}
@@ -99,6 +99,9 @@ func (e *Engine) resolve(ctx context.Context, db *q.Queries, p config.Principal,
 		return work{}, ErrInvalid
 	}
 	if cap.Execute == nil {
+		return work{}, ErrUnsupported
+	}
+	if !e.offerEnabled(cap.Key(), target.Namespace) {
 		return work{}, ErrUnsupported
 	}
 	in.Params = params
@@ -140,6 +143,9 @@ func (e *Engine) resolve(ctx context.Context, db *q.Queries, p config.Principal,
 	if err != nil {
 		return work{}, err
 	}
+	// The selected execution key already identifies the output schema. Preserve
+	// the existing fingerprint input, including for explicit v1 requests.
+	in.OutputSchema = nil
 	fingerprint, err := hashValue(struct {
 		Request
 		Namespace string
@@ -150,8 +156,8 @@ func (e *Engine) resolve(ctx context.Context, db *q.Queries, p config.Principal,
 
 func (e *Engine) resolveStored(ctx context.Context, db *q.Queries, namespaces []string, id uuid.UUID,
 	capability, key string, params, scope, fingerprint []byte) (work, error) {
-	cap, ok := e.Registry.Capability(capability)
-	if !ok || cap.Execute == nil || cap.Key() != key {
+	cap, ok := e.Registry.CapabilityByKey(key)
+	if !ok || cap.Execute == nil || cap.Capability != capability {
 		return work{}, ErrUnsupported
 	}
 	target, err := found(db.Target(ctx, q.TargetParams{ID: id, Namespaces: namespaces}))

@@ -49,6 +49,7 @@ type steamEvidencePlane struct {
 	cfg           config.Worker
 	writer, agent config.Principal
 	operator      config.Principal
+	principals    []config.Principal
 	workerID      uuid.UUID
 	body          atomic.Pointer[[]byte]
 	requests      atomic.Int32
@@ -57,7 +58,7 @@ type steamEvidencePlane struct {
 	completion    execution.Completion
 }
 
-func newSteamEvidencePlane(t *testing.T) *steamEvidencePlane {
+func newSteamEvidencePlane(t *testing.T, previewNamespaces ...string) *steamEvidencePlane {
 	t.Helper()
 	path := os.Getenv("HARVEST_NATIVE_EVIDENCE_DB_CONFIG")
 	if path == "" {
@@ -96,8 +97,10 @@ func newSteamEvidencePlane(t *testing.T) *steamEvidencePlane {
 	wrongCapability := config.Principal{Name: "wrong_capability", Role: "operator", Token: strings.Repeat("f", 40),
 		Namespaces: namespaces, Capabilities: []string{"steam.news"}}
 	reader := config.Principal{Name: "reader", Role: "reader", Token: strings.Repeat("g", 40), Namespaces: namespaces}
-	people := []config.Principal{s.writer, s.agent, foreign, s.operator, limited, wrongCapability, reader}
-	s.engine = execution.New(db, s.registry, people, config.Retention{})
+	legacyReader := config.Principal{Name: "legacy_reader", Role: "reader", Token: strings.Repeat("h", 40), Namespaces: namespaces[:1]}
+	people := []config.Principal{s.writer, s.agent, foreign, s.operator, limited, wrongCapability, reader, legacyReader}
+	s.principals = people
+	s.engine = execution.NewConfigured(db, s.registry, config.Config{Principals: people, SteamMediaV2Namespaces: previewNamespaces})
 	netPolicy := egress.NetworkConfig{GlobalBucket: "global",
 		Routes: []egress.RouteConfig{{Profile: profile, Mode: egress.PreferProxy, AllowDirect: true,
 			Paths: []egress.PathConfig{

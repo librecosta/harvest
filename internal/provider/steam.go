@@ -18,6 +18,8 @@ import (
 )
 
 const (
+	SteamMediaV2Key   = "steam.details:1:2:steam_v2"
+	steamSegmentBytes = 32 << 10
 	steamStore        = "https://store.steampowered.com"
 	steamAPI          = "https://api.steampowered.com"
 	steamDetailsPath  = "/api/appdetails"
@@ -67,7 +69,7 @@ func SteamManifest(fixture *egress.FixtureNetwork) Manifest {
 				}
 				return out
 			},
-			Source: "steam", MaxDataBytes: 32 << 10, Sample: spec.name == "steam.players",
+			Source: "steam", MaxDataBytes: steamSegmentBytes, Sample: spec.name == "steam.players",
 			NormalizeScopedData: spec.normalize,
 			DiagnosticEvidence: append(slices.Clone(webDiagnostics), "source_invalid", "source_incomplete", "source_redirect", "upstream_unavailable",
 				"upstream_blocked", "steam_unavailable", "price_unavailable", "price_unreleased", "media_unavailable"),
@@ -75,12 +77,20 @@ func SteamManifest(fixture *egress.FixtureNetwork) Manifest {
 		if spec.name == "steam.news" {
 			obs.EmptyEvidence = "empty_page"
 		}
-		m.Capabilities = append(m.Capabilities, Capability{
+		capability := Capability{
 			Offer: Offer{spec.name, 1, 1, "steam_v1"}, Resource: "app", MinInterval: spec.minInterval, Timeout: 20 * time.Second,
 			Partial: spec.name == "steam.details", PointInTimeOnly: spec.name == "steam.players", NormalizeParams: spec.params, Execute: spec.run, Observation: obs,
 			Network: &egress.Source{Steam: true, AllowDirect: true, RequireRegion: true, Origins: []string{spec.origin},
 				FixedPath: spec.path, MaxRequests: 1, MaxBodyBytes: spec.budget, ContentTypes: []string{"application/json", "text/json", "text/javascript"}, FixtureNetwork: fixture},
-		})
+		}
+		m.Capabilities = append(m.Capabilities, capability)
+		if spec.name == "steam.details" {
+			mediaPolicy := *obs
+			mediaPolicy.MaxSegmentBytes = steamSegmentBytes
+			capability.Observation = &mediaPolicy
+			capability.OutputSchema, capability.Implementation = 2, "steam_v2"
+			m.Capabilities = append(m.Capabilities, capability)
+		}
 	}
 	return m
 }
@@ -200,6 +210,9 @@ func steamSegment(t Task, section, code string, data any) Segment {
 	}
 	s := webSegment(steamScope(t, section), state, evidence, data)
 	s.Source = "steam"
+	if t.Offer.OutputSchema != 0 {
+		s.OutputSchema = t.Offer.OutputSchema
+	}
 	return s
 }
 

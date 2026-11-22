@@ -150,9 +150,9 @@ func (e *Engine) dispatchOffers(ctx context.Context, db *q.Queries, p config.Pri
 			return nil, nil, err
 		}
 	}
-	for _, name := range p.Capabilities {
-		cap, ok := e.Registry.Capability(name)
-		if !ok || cap.Execute == nil || !slices.Contains(w.Offers, cap.Key()) {
+	for _, key := range w.Offers {
+		cap, ok := e.Registry.CapabilityByKey(key)
+		if !ok || cap.Execute == nil || !canCapability(p, cap.Capability) {
 			continue
 		}
 		if cap.Network == nil {
@@ -163,7 +163,8 @@ func (e *Engine) dispatchOffers(ctx context.Context, db *q.Queries, p config.Pri
 			continue
 		}
 		for _, rule := range e.network.Sources {
-			if rule.Capability != name || !canNamespace(p, rule.Namespace) || slices.ContainsFunc(blocked, func(row q.UnavailableQuotaAccountsRow) bool { return row.Key == rule.AccountBucket }) {
+			if rule.Capability != cap.Capability || !canNamespace(p, rule.Namespace) || !e.offerEnabled(key, rule.Namespace) ||
+				slices.ContainsFunc(blocked, func(row q.UnavailableQuotaAccountsRow) bool { return row.Key == rule.AccountBucket }) {
 				continue
 			}
 			if !slices.Contains(p.EgressProfiles, rule.Profile) {

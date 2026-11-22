@@ -62,7 +62,7 @@ func Run(ctx context.Context, cfg config.Config, registry *provider.Registry, lo
 		}
 		return err
 	}
-	engine := execution.NewWithSteamEvidence(pool, registry, cfg.Principals, cfg.Retention, cfg.SteamEvidence)
+	engine := execution.NewConfigured(pool, registry, cfg)
 	check, cancel = context.WithTimeout(ctx, 3*time.Second)
 	err = engine.LoadNetworkPolicy(check)
 	cancel()

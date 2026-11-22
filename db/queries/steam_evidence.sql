@@ -117,7 +117,9 @@ ORDER BY e.last_server_confirmed_at, e.id LIMIT sqlc.arg(batch_size)::integer;
 SELECT (c.value->>'id')::uuid AS id FROM jsonb_array_elements(sqlc.arg(candidates)::jsonb) c
 WHERE EXISTS (
     SELECT 1 FROM harvest.schedules s JOIN harvest.targets t ON t.id = s.target_id AND t.namespace = s.namespace
-    WHERE s.enabled AND s.capability = 'steam.details' AND s.request_schema = 1 AND s.execution_key = sqlc.arg(execution_key)::text
+    WHERE s.enabled AND s.capability = 'steam.details' AND s.request_schema = 1
+      AND (s.execution_key = sqlc.arg(execution_key)::text OR
+          (s.execution_key = sqlc.arg(pilot_offer)::text AND s.namespace = ANY(sqlc.arg(pilot_namespaces)::text[])))
       AND s.target_id = (c.value->>'target_id')::uuid AND s.namespace = c.value->>'namespace'
       AND t.state = 'active' AND t.provider = 'steam' AND t.resource_type = 'app'
       AND s.scope->>'locale' = c.value->>'locale' AND upper(s.scope->>'region') = c.value->>'store_country'

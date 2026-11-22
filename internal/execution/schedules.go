@@ -13,6 +13,7 @@ import (
 
 	"github.com/librecosta/harvest/internal/config"
 	q "github.com/librecosta/harvest/internal/database/queries"
+	"github.com/librecosta/harvest/internal/provider"
 )
 
 const pointWindow = 5 * time.Second
@@ -182,12 +183,16 @@ func (e *Engine) EditSchedule(ctx context.Context, p config.Principal, id uuid.U
 			}
 		}
 		r := recurrence(s)
-		cap, _ := e.Registry.Capability(s.Capability)
+		cap, _ := e.Registry.CapabilityByKey(s.ExecutionKey)
 		if patch.Request != nil {
 			if patch.Request.TargetID != s.TargetID {
 				return s, ErrInvalid
 			}
-			w, err := e.resolve(ctx, db, p, *patch.Request)
+			req := *patch.Request
+			if req.OutputSchema == nil && req.Capability == cap.Capability && req.RequestSchema == cap.RequestSchema {
+				req.OutputSchema = &cap.OutputSchema
+			}
+			w, err := e.resolve(ctx, db, p, req)
 			if err != nil {
 				return s, err
 			}
@@ -201,7 +206,7 @@ func (e *Engine) EditSchedule(ctx context.Context, p config.Principal, id uuid.U
 			r.Cron = strings.Join(strings.Fields(r.Cron), " ")
 		}
 		if patch.Request != nil || patch.Recurrence != nil || patch.ExecutionPolicy != nil {
-			if cap.Execute == nil || cap.Key() != s.ExecutionKey {
+			if cap.Execute == nil || cap.Capability != s.Capability {
 				return s, ErrUnsupported
 			}
 			if cap.PointInTimeOnly && r.Policy != "point_in_time" {
@@ -238,6 +243,9 @@ func (e *Engine) EditSchedule(ctx context.Context, p config.Principal, id uuid.U
 			}
 		}
 		if patch.Enabled != nil {
+			if *patch.Enabled && !e.offerEnabled(s.ExecutionKey, s.Namespace) {
+				return s, ErrUnsupported
+			}
 			s.Enabled = *patch.Enabled
 		}
 		return db.UpdateSchedule(ctx, q.UpdateScheduleParams{
@@ -250,7 +258,9 @@ func (e *Engine) EditSchedule(ctx context.Context, p config.Principal, id uuid.U
 
 func (e *Engine) reconcileOne(ctx context.Context, offers []string) (bool, error) {
 	return tx(ctx, e, func(db *q.Queries) (bool, error) {
-		s, err := db.LockDueSchedule(ctx, offers)
+		s, err := db.LockDueSchedule(ctx, q.LockDueScheduleParams{
+			Offers: offers, PilotOffer: provider.SteamMediaV2Key, PilotNamespaces: e.steamMediaV2Namespaces,
+		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, nil
 		}

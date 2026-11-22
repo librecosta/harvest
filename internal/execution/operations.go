@@ -206,6 +206,9 @@ func (e *Engine) JobWaitingReason(ctx context.Context, job q.HarvestJob) (string
 	if e.draining.Load() {
 		return "server_draining", nil
 	}
+	if !e.offerEnabled(job.ExecutionKey, job.Namespace) {
+		return "capability_unavailable", nil
+	}
 	now, err := e.queries.DBNow(ctx)
 	if err != nil {
 		return "", err
@@ -223,7 +226,7 @@ func (e *Engine) JobWaitingReason(ctx context.Context, job q.HarvestJob) (string
 	if target.State != "active" {
 		return "target_archived", nil
 	}
-	if cap, ok := e.Registry.Capability(job.Capability); ok && cap.Network != nil {
+	if cap, ok := e.Registry.CapabilityByKey(job.ExecutionKey); ok && cap.Capability == job.Capability && cap.Network != nil {
 		e.admission.RLock()
 		defer e.admission.RUnlock()
 		return e.networkWaiting(ctx, job, cap)

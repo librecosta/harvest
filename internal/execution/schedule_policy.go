@@ -177,8 +177,8 @@ func (e *Engine) ScheduleExecutionPolicy(ctx context.Context, principal config.P
 	if err != nil {
 		return SchedulePolicyView{}, err
 	}
-	cap, ok := e.Registry.Capability(s.Capability)
-	if !ok || cap.Execute == nil {
+	cap, ok := e.Registry.CapabilityByKey(s.ExecutionKey)
+	if !ok || cap.Execute == nil || cap.Capability != s.Capability {
 		return SchedulePolicyView{}, ErrUnsupported
 	}
 	policy := executionPolicy(s.ExecutionPolicy)

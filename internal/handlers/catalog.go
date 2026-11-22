@@ -80,18 +80,22 @@ type scheduleView struct {
 	ExecutionPolicy execution.ExecutionPolicy `json:"execution_policy"`
 }
 
-func requestView(id uuid.UUID, capability string, version int32, params, scope []byte) execution.Request {
+func (a *API) requestView(id uuid.UUID, capability, key string, version int32, params, scope []byte) execution.Request {
 	var s provider.Scope
 	// The service writes the typed scope, so this is valid for all stored rows.
 	_ = json.Unmarshal(scope, &s)
-	return execution.Request{TargetID: id, Capability: capability, RequestSchema: version, Params: jsontext.Value(params), Scope: s}
+	out := execution.Request{TargetID: id, Capability: capability, RequestSchema: version, Params: jsontext.Value(params), Scope: s}
+	if cap, ok := a.engine.Registry.CapabilityByKey(key); ok && cap.OutputSchema != 1 {
+		out.OutputSchema = &cap.OutputSchema
+	}
+	return out
 }
 
-func showSchedule(s q.HarvestSchedule) scheduleView {
+func (a *API) showSchedule(s q.HarvestSchedule) scheduleView {
 	var policy execution.ExecutionPolicy
 	_ = json.Unmarshal(s.ExecutionPolicy, &policy)
 	return scheduleView{
-		ID: s.ID, Namespace: s.Namespace, Request: requestView(s.TargetID, s.Capability, s.RequestSchema, s.Params, s.Scope),
+		ID: s.ID, Namespace: s.Namespace, Request: a.requestView(s.TargetID, s.Capability, s.ExecutionKey, s.RequestSchema, s.Params, s.Scope),
 		Recurrence: execution.Recurrence{IntervalSeconds: s.IntervalSeconds, Cron: s.Cron, AnchorAt: s.AnchorAt, Policy: s.Policy},
 		NextDueAt:  s.NextDueAt, Enabled: s.Enabled, Revision: s.Revision, Missed: s.MissedCount, ExecutionPolicy: policy,
 	}
@@ -122,7 +126,7 @@ func (a *API) Schedules(c fiber.Ctx) error {
 		return a.respond(c, 200, nil, err)
 	}
 	rows, err := a.engine.Schedules(c.Context(), request(c).principal, p)
-	return a.respond(c, 200, list(rows, p.Size, func(s q.HarvestSchedule) (scheduleView, uuid.UUID) { return showSchedule(s), s.ID }), err)
+	return a.respond(c, 200, list(rows, p.Size, func(s q.HarvestSchedule) (scheduleView, uuid.UUID) { return a.showSchedule(s), s.ID }), err)
 }
 
 func (a *API) Schedule(c fiber.Ctx) error {
@@ -131,13 +135,13 @@ func (a *API) Schedule(c fiber.Ctx) error {
 		return a.respond(c, 200, nil, err)
 	}
 	s, err := a.engine.Schedule(c.Context(), request(c).principal, id)
-	return a.respond(c, 200, showSchedule(s), err)
+	return a.respond(c, 200, a.showSchedule(s), err)
 }
 
 func (a *API) CreateSchedule() fiber.Handler {
 	return action(a, 201, func(c fiber.Ctx, p config.Principal, in execution.ScheduleInput) (any, error) {
 		s, err := a.engine.CreateSchedule(c.Context(), p, in)
-		return showSchedule(s), err
+		return a.showSchedule(s), err
 	})
 }
 
@@ -148,6 +152,6 @@ func (a *API) EditSchedule() fiber.Handler {
 			return nil, err
 		}
 		s, err := a.engine.EditSchedule(c.Context(), p, id, in)
-		return showSchedule(s), err
+		return a.showSchedule(s), err
 	})
 }

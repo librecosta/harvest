@@ -216,11 +216,18 @@ SELECT s.id, s.target_id, s.namespace, s.capability, s.request_schema, s.executi
 JOIN harvest.targets t ON t.id = s.target_id
 WHERE s.enabled AND s.next_due_at <= statement_timestamp() AND t.state = 'active'
   AND s.execution_key = ANY($1::text[])
+  AND (s.execution_key <> $2::text OR s.namespace = ANY($3::text[]))
 ORDER BY s.next_due_at, s.id LIMIT 1 FOR UPDATE OF s SKIP LOCKED
 `
 
-func (q *Queries) LockDueSchedule(ctx context.Context, offers []string) (HarvestSchedule, error) {
-	row := q.db.QueryRow(ctx, lockDueSchedule, offers)
+type LockDueScheduleParams struct {
+	Offers          []string `json:"offers"`
+	PilotOffer      string   `json:"pilot_offer"`
+	PilotNamespaces []string `json:"pilot_namespaces"`
+}
+
+func (q *Queries) LockDueSchedule(ctx context.Context, arg LockDueScheduleParams) (HarvestSchedule, error) {
+	row := q.db.QueryRow(ctx, lockDueSchedule, arg.Offers, arg.PilotOffer, arg.PilotNamespaces)
 	var i HarvestSchedule
 	err := row.Scan(
 		&i.ID,

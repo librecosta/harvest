@@ -38,6 +38,7 @@ type Request struct {
 	TargetID      uuid.UUID      `json:"target_id"`
 	Capability    string         `json:"capability"`
 	RequestSchema int32          `json:"request_schema"`
+	OutputSchema  *int32         `json:"output_schema,omitempty"`
 	Params        jsontext.Value `json:"params"`
 	Scope         provider.Scope `json:"scope"`
 }

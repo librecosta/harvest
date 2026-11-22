@@ -47,9 +47,9 @@ type attemptView struct {
 	EgressRegion *string    `json:"egress_region,omitempty"`
 }
 
-func showJob(j q.HarvestJob) jobView {
+func (a *API) showJob(j q.HarvestJob) jobView {
 	return jobView{
-		ID: j.ID, Namespace: j.Namespace, Request: requestView(j.TargetID, j.Capability, j.RequestSchema, j.Params, j.Scope),
+		ID: j.ID, Namespace: j.Namespace, Request: a.requestView(j.TargetID, j.Capability, j.ExecutionKey, j.RequestSchema, j.Params, j.Scope),
 		State: j.State, Cause: j.Cause, AvailableAt: j.AvailableAt, DeadlineAt: j.DeadlineAt, UpdatedAt: j.UpdatedAt, CreatedAt: j.CreatedAt,
 		AttemptCount: j.AttemptCount, MaxAttempts: j.MaxAttempts, Generation: j.Generation, Code: j.LastCode,
 		ScheduleID: j.ScheduleID, ScheduleRevision: j.ScheduleRevision, ScheduledFor: j.ScheduledFor,
@@ -63,7 +63,7 @@ func (a *API) Jobs(c fiber.Ctx) error {
 		return a.respond(c, 200, nil, err)
 	}
 	rows, err := a.engine.Jobs(c.Context(), request(c).principal, p)
-	return a.respond(c, 200, list(rows, p.Size, func(j q.HarvestJob) (jobView, uuid.UUID) { return showJob(j), j.ID }), err)
+	return a.respond(c, 200, list(rows, p.Size, func(j q.HarvestJob) (jobView, uuid.UUID) { return a.showJob(j), j.ID }), err)
 }
 
 func (a *API) CollectionStatus(c fiber.Ctx) error {
@@ -125,7 +125,7 @@ func (a *API) CollectionJobs(c fiber.Ctx) error {
 		out.Before = &rows[len(rows)-1].ID
 	}
 	for _, row := range rows {
-		out.Items = append(out.Items, showJob(row))
+		out.Items = append(out.Items, a.showJob(row))
 	}
 	return a.respond(c, 200, out, nil)
 }
@@ -173,16 +173,16 @@ func (a *API) ScheduleJobs(c fiber.Ctx) error {
 		Items       []jobView    `json:"items"`
 		Before      *uuid.UUID   `json:"before,omitempty"`
 		LastFailure *jobView     `json:"last_failure,omitempty"`
-	}{Schedule: showSchedule(schedule), Items: []jobView{}}
+	}{Schedule: a.showSchedule(schedule), Items: []jobView{}}
 	if len(rows) > int(limit) {
 		rows = rows[:limit]
 		out.Before = &rows[len(rows)-1].ID
 	}
 	for _, row := range rows {
-		out.Items = append(out.Items, showJob(row))
+		out.Items = append(out.Items, a.showJob(row))
 	}
 	if lastFailure != nil {
-		job := showJob(*lastFailure)
+		job := a.showJob(*lastFailure)
 		out.LastFailure = &job
 	}
 	return a.respond(c, 200, out, nil)
@@ -212,13 +212,13 @@ func (a *API) Job(c fiber.Ctx) error {
 		History []attemptView               `json:"attempts"`
 		Waiting string                      `json:"waiting_reason,omitempty"`
 		Results []execution.ObservationView `json:"confirmed_results,omitempty"`
-	}{showJob(j), history, waiting, results}, err)
+	}{a.showJob(j), history, waiting, results}, err)
 }
 
 func (a *API) SubmitJob() fiber.Handler {
 	return action(a, 202, func(c fiber.Ctx, p config.Principal, in execution.Submit) (any, error) {
 		j, err := a.engine.SubmitJob(c.Context(), p, c.Get("Idempotency-Key"), in)
-		return showJob(j), err
+		return a.showJob(j), err
 	})
 }
 
@@ -228,7 +228,7 @@ func (a *API) CancelJob(c fiber.Ctx) error {
 		return a.respond(c, 202, nil, err)
 	}
 	j, err := a.engine.CancelJob(c.Context(), request(c).principal, id)
-	return a.respond(c, 202, showJob(j), err)
+	return a.respond(c, 202, a.showJob(j), err)
 }
 
 func (a *API) RetryJob(c fiber.Ctx) error {
@@ -237,7 +237,7 @@ func (a *API) RetryJob(c fiber.Ctx) error {
 		return a.respond(c, 202, nil, err)
 	}
 	j, err := a.engine.RetryJob(c.Context(), request(c).principal, c.Get("Idempotency-Key"), id)
-	return a.respond(c, 202, showJob(j), err)
+	return a.respond(c, 202, a.showJob(j), err)
 }
 
 func (a *API) Operations(c fiber.Ctx) error {

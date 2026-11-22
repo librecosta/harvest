@@ -67,18 +67,21 @@ func validateWorker(w Worker) error {
 		return errors.New("invalid worker token, concurrency, offers or egress profiles")
 	}
 	seen := make(map[string]bool)
+	offered := make(map[string]bool)
 	for _, offer := range w.Offers {
+		key := offer.Key()
 		if !validCapability(offer.Capability) || offer.RequestSchema < 1 || offer.OutputSchema < 1 ||
-			!provider.Identifier(offer.Implementation) || seen[offer.Capability] {
+			!provider.Identifier(offer.Implementation) || seen[key] {
 			return errors.New("invalid or duplicate worker offer")
 		}
-		seen[offer.Capability] = true
+		seen[key] = true
+		offered[offer.Capability] = true
 	}
-	if seen[provider.SteamCatalog] && !validSteamCatalogKey(w.SteamCatalogAPIKey) ||
-		!seen[provider.SteamCatalog] && w.SteamCatalogAPIKey != "" {
+	if offered[provider.SteamCatalog] && !validSteamCatalogKey(w.SteamCatalogAPIKey) ||
+		!offered[provider.SteamCatalog] && w.SteamCatalogAPIKey != "" {
 		return errors.New("steam.catalog requires a hexadecimal Web API key in the executing Worker YAML")
 	}
-	if len(w.SteamEvidenceAppIDs) > 8 || len(w.SteamEvidenceAppIDs) != 0 && !seen["steam.details"] {
+	if len(w.SteamEvidenceAppIDs) > 8 || len(w.SteamEvidenceAppIDs) != 0 && !offered["steam.details"] {
 		return errors.New("steam_evidence_app_ids requires a steam.details offer and permits at most eight AppIDs")
 	}
 	apps := make(map[int64]bool, len(w.SteamEvidenceAppIDs))

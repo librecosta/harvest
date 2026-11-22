@@ -10,6 +10,7 @@ import (
 
 	q "github.com/librecosta/harvest/internal/database/queries"
 	"github.com/librecosta/harvest/internal/egress"
+	"github.com/librecosta/harvest/internal/provider"
 )
 
 func (e *Engine) admitSteamEvidence(ctx context.Context, db *q.Queries, state q.HarvestSteamEvidenceMaintenance,
@@ -215,6 +216,7 @@ func (e *Engine) trackedSteamEvidence(ctx context.Context, db *q.Queries, rows [
 	}
 	ids, err := db.TrackedSteamEvidenceIDs(ctx, q.TrackedSteamEvidenceIDsParams{
 		ExecutionKey: capability.Key(), Candidates: data,
+		PilotOffer: provider.SteamMediaV2Key, PilotNamespaces: e.steamMediaV2Namespaces,
 	})
 	if err != nil {
 		return nil, err

@@ -102,6 +102,9 @@ func (e *Engine) SubmitJob(ctx context.Context, p config.Principal, key string, 
 		if w.target.State != "active" {
 			return q.HarvestJob{}, ErrConflict
 		}
+		if !e.offerEnabled(w.capability.Key(), w.target.Namespace) {
+			return q.HarvestJob{}, ErrUnsupported
+		}
 		if w.capability.PointInTimeOnly {
 			attempts, lifetime = 1, pointWindow
 		}
@@ -170,6 +173,9 @@ func (e *Engine) RetryJob(ctx context.Context, p config.Principal, key string, i
 		}
 		if w.target.State != "active" {
 			return old, ErrConflict
+		}
+		if !e.offerEnabled(w.capability.Key(), w.target.Namespace) {
+			return old, ErrUnsupported
 		}
 		pointSample := old.ScheduleID != nil && old.MaxAttempts == 1 &&
 			(old.ScheduledFor != nil && old.DeadlineAt.Equal(old.ScheduledFor.Add(pointWindow)) ||

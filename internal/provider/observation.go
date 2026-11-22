@@ -44,12 +44,14 @@ type ObservationPolicy struct {
 	EmptyEvidence           string
 	WithdrawEvidence        string
 	MaxDataBytes            int
+	MaxSegmentBytes         int
 	Sample                  bool
 }
 
 func (p *ObservationPolicy) valid() bool {
 	return p.Scopes != nil && (p.NormalizeData != nil || p.NormalizeScopedData != nil) && Identifier(p.Source) && p.MaxDataBytes > 0 &&
 		!slices.ContainsFunc(p.DiagnosticEvidence, func(code string) bool { return !Identifier(code) }) && p.MaxDataBytes <= MaxSegmentData && (p.EmptyEvidence == "" || Identifier(p.EmptyEvidence)) &&
+		p.MaxSegmentBytes >= 0 && p.MaxSegmentBytes <= MaxCompletionBody &&
 		(p.WithdrawEvidence == "" || !p.Sample && Identifier(p.WithdrawEvidence) && p.WithdrawEvidence != p.EmptyEvidence)
 }
 

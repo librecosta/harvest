@@ -23,6 +23,10 @@ func ValidSteamEvidence(task Task, body []byte) bool {
 	if len(body) == 0 || len(body) > MaxSteamEvidenceBytes || !jsontext.Value(body).IsValid() {
 		return false
 	}
+	if task.Offer.OutputSchema == 2 {
+		match, _, err := resolveSteamDetailsV2(body, steamAppID(task))
+		return err == nil && steamText(match.Result.Data.Name, 256) != ""
+	}
 	var envelope storefront.AppDetailsEnvelope
 	if err := json.Unmarshal(body, &envelope); err != nil {
 		return false

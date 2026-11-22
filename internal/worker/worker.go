@@ -23,7 +23,7 @@ import (
 
 func Validate(cfg config.Worker, registry *provider.Registry) error {
 	for _, offer := range cfg.Offers {
-		c, ok := registry.Capability(offer.Capability)
+		c, ok := registry.CapabilityByKey(offer.Key())
 		if !ok || c.Execute == nil || c.Offer != offer {
 			return errors.New("worker offer is not compiled and executable in this binary")
 		}
@@ -169,8 +169,8 @@ func wait(ctx context.Context, duration time.Duration) {
 const safetyMargin = 100 * time.Millisecond
 
 func execute(ctx context.Context, api client, registry *provider.Registry, pool *egress.Pool, claim execution.Claim, started time.Time, cfg config.Worker, logger *slog.Logger) {
-	cap, ok := registry.Capability(claim.Task.Offer.Capability)
-	if !ok || cap.Execute == nil || cap.Offer != claim.Task.Offer || claim.LeaseMS < 1 {
+	cap, ok := registry.CapabilityByKey(claim.Task.Offer.Key())
+	if !ok || cap.Execute == nil || cap.Offer != claim.Task.Offer || !slices.Contains(cfg.Offers, claim.Task.Offer) || claim.LeaseMS < 1 {
 		return
 	}
 	deadline := started.Add(time.Duration(claim.LeaseMS)*time.Millisecond - safetyMargin)

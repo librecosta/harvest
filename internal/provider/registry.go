@@ -117,11 +117,19 @@ type Info struct {
 
 type Registry struct {
 	manifests map[string]Manifest
-	caps      map[string]Capability
+	defaults  map[string]Capability
+	offers    map[string]Capability
+	versions  map[offerVersion]Capability
+}
+
+type offerVersion struct {
+	name            string
+	request, output int32
 }
 
 func New(manifests ...Manifest) (*Registry, error) {
-	r := &Registry{manifests: make(map[string]Manifest), caps: make(map[string]Capability)}
+	r := &Registry{manifests: make(map[string]Manifest), defaults: make(map[string]Capability),
+		offers: make(map[string]Capability), versions: make(map[offerVersion]Capability)}
 	for _, m := range manifests {
 		if !Identifier(m.Name) || r.manifests[m.Name].Name != "" || len(m.Resources) == 0 {
 			return nil, errors.New("invalid provider registration")
@@ -135,14 +143,22 @@ func New(manifests ...Manifest) (*Registry, error) {
 		}
 		for _, c := range m.Capabilities {
 			name, operation, ok := strings.Cut(c.Capability, ".")
+			key := c.Key()
+			version := offerVersion{c.Capability, c.RequestSchema, c.OutputSchema}
 			if !ok || name != m.Name || !Identifier(operation) || !resources[c.Resource] ||
 				c.RequestSchema < 1 || c.OutputSchema < 1 || !Identifier(c.Implementation) ||
 				c.MinInterval < time.Second || c.Timeout < time.Second || c.Timeout > 2*time.Minute ||
-				c.NormalizeParams == nil || (c.Observation == nil && c.NormalizeOutput == nil) || r.caps[c.Capability].Capability != "" ||
+				c.NormalizeParams == nil || (c.Observation == nil && c.NormalizeOutput == nil) || r.offers[key].Capability != "" ||
+				r.versions[version].Capability != "" ||
 				(c.Network != nil && !c.Network.Valid()) || (c.Observation != nil && !c.Observation.valid()) {
 				return nil, errors.New("invalid capability registration")
 			}
-			r.caps[c.Capability] = c
+			r.offers[key] = c
+			r.versions[version] = c
+			// The first declared Offer for a name is its legacy default.
+			if _, exists := r.defaults[c.Capability]; !exists {
+				r.defaults[c.Capability] = c
+			}
 		}
 		r.manifests[m.Name] = Manifest{m.Name, slices.Clone(m.Resources), slices.Clone(m.Capabilities)}
 	}
@@ -162,15 +178,29 @@ func (r *Registry) Normalize(provider, resource, key string) (string, error) {
 }
 
 func (r *Registry) Capability(name string) (Capability, bool) {
-	c, ok := r.caps[name]
+	c, ok := r.defaults[name]
+	return c, ok
+}
+
+func (r *Registry) CapabilityByKey(key string) (Capability, bool) {
+	c, ok := r.offers[key]
+	return c, ok
+}
+
+func (r *Registry) SelectCapability(name string, request int32, output *int32) (Capability, bool) {
+	if output == nil {
+		c, ok := r.Capability(name)
+		return c, ok && c.RequestSchema == request
+	}
+	c, ok := r.versions[offerVersion{name, request, *output}]
 	return c, ok
 }
 
 func (r *Registry) ExecutableKeys() []string {
 	var keys []string
-	for _, c := range r.caps {
+	for key, c := range r.offers {
 		if c.Execute != nil {
-			keys = append(keys, c.Key())
+			keys = append(keys, key)
 		}
 	}
 	return keys

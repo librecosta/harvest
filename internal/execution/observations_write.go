@@ -146,6 +146,15 @@ func normalizeSegments(cap provider.Capability, task provider.Task, result *prov
 		default:
 			return nil, ErrInvalid
 		}
+		if policy.MaxSegmentBytes != 0 {
+			encoded, err := json.Marshal(s.Segment)
+			if err != nil {
+				return nil, ErrInvalid
+			}
+			if len(encoded) > policy.MaxSegmentBytes {
+				return nil, ErrTooLarge
+			}
+		}
 		s.scopeJSON, err = json.Marshal(scope, json.Deterministic(true))
 		if err != nil {
 			return nil, ErrInvalid

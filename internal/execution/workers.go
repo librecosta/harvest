@@ -24,7 +24,7 @@ func (e *Engine) registrationKeys(p config.Principal, req Registration) ([]strin
 	}
 	keys := make([]string, 0, len(req.Offers))
 	for _, offer := range req.Offers {
-		c, ok := e.Registry.Capability(offer.Capability)
+		c, ok := e.Registry.CapabilityByKey(offer.Key())
 		if !ok || c.Execute == nil || c.Offer != offer || !canCapability(p, offer.Capability) ||
 			slices.Contains(keys, offer.Key()) {
 			return nil, nil, ErrUnsupported
@@ -252,8 +252,8 @@ func (e *Engine) Renew(ctx context.Context, p config.Principal, id uuid.UUID, fe
 		if !validLease(job, a, now) {
 			return Renewal{}, ErrFence
 		}
-		cap, ok := e.Registry.Capability(job.Capability)
-		if !ok || cap.Execute == nil || cap.Key() != job.ExecutionKey {
+		cap, ok := e.Registry.CapabilityByKey(job.ExecutionKey)
+		if !ok || cap.Execute == nil || cap.Capability != job.Capability {
 			return Renewal{}, ErrUnsupported
 		}
 		if job.State == "cancel_requested" {
@@ -274,8 +274,8 @@ func (e *Engine) Complete(ctx context.Context, p config.Principal, id uuid.UUID,
 		if err != nil {
 			return Receipt{}, err
 		}
-		cap, ok := e.Registry.Capability(job.Capability)
-		if !ok || cap.Execute == nil || cap.Key() != job.ExecutionKey || cap.OutputSchema != in.OutputSchema {
+		cap, ok := e.Registry.CapabilityByKey(job.ExecutionKey)
+		if !ok || cap.Execute == nil || cap.Capability != job.Capability || cap.OutputSchema != in.OutputSchema {
 			return Receipt{}, ErrUnsupported
 		}
 		result, retryable, err := normalizeResult(cap, in.Result)

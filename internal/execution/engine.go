@@ -21,20 +21,21 @@ import (
 )
 
 type Engine struct {
-	Registry         *provider.Registry
-	db               *pgxpool.Pool
-	queries          *q.Queries
-	admission        sync.RWMutex
-	draining         atomic.Bool
-	workerPolicies   []config.Principal
-	network          egress.NetworkConfig // admission guards the effective policy and all dependent operations.
-	policy           q.HarvestOperationalPolicy
-	quotaBindings    map[string]string
-	policyUncertain  bool
-	retention        config.Retention
-	steamEvidence    config.SteamEvidence
-	consumerPolicies map[string]config.Principal
-	rdap             rdapCache
+	Registry               *provider.Registry
+	db                     *pgxpool.Pool
+	queries                *q.Queries
+	admission              sync.RWMutex
+	draining               atomic.Bool
+	workerPolicies         []config.Principal
+	network                egress.NetworkConfig // admission guards the effective policy and all dependent operations.
+	policy                 q.HarvestOperationalPolicy
+	quotaBindings          map[string]string
+	policyUncertain        bool
+	retention              config.Retention
+	steamEvidence          config.SteamEvidence
+	steamMediaV2Namespaces []string
+	consumerPolicies       map[string]config.Principal
+	rdap                   rdapCache
 }
 
 func New(db *pgxpool.Pool, registry *provider.Registry, principals []config.Principal, retention config.Retention) *Engine {
@@ -42,12 +43,17 @@ func New(db *pgxpool.Pool, registry *provider.Registry, principals []config.Prin
 }
 
 func NewWithSteamEvidence(db *pgxpool.Pool, registry *provider.Registry, principals []config.Principal, retention config.Retention, evidence config.SteamEvidence) *Engine {
+	return NewConfigured(db, registry, config.Config{Principals: principals, Retention: retention, SteamEvidence: evidence})
+}
+
+func NewConfigured(db *pgxpool.Pool, registry *provider.Registry, cfg config.Config) *Engine {
+	retention, evidence := cfg.Retention, cfg.SteamEvidence
 	if retention == (config.Retention{}) {
 		retention = config.DefaultRetention()
 	}
 	consumers := make(map[string]config.Principal)
 	var workers []config.Principal
-	for _, p := range principals {
+	for _, p := range cfg.Principals {
 		if p.Role == "worker" {
 			workers = append(workers, config.Principal{Name: p.Name, Namespaces: slices.Clone(p.Namespaces), Capabilities: slices.Clone(p.Capabilities), EgressProfiles: slices.Clone(p.EgressProfiles)})
 		} else {
@@ -57,7 +63,12 @@ func NewWithSteamEvidence(db *pgxpool.Pool, registry *provider.Registry, princip
 	if evidence == (config.SteamEvidence{}) {
 		evidence = config.DefaultSteamEvidence()
 	}
-	return &Engine{Registry: registry, db: db, queries: q.New(db), workerPolicies: workers, retention: retention, steamEvidence: evidence, consumerPolicies: consumers}
+	return &Engine{Registry: registry, db: db, queries: q.New(db), workerPolicies: workers, retention: retention, steamEvidence: evidence,
+		steamMediaV2Namespaces: slices.Clone(cfg.SteamMediaV2Namespaces), consumerPolicies: consumers}
+}
+
+func (e *Engine) offerEnabled(key, namespace string) bool {
+	return key != provider.SteamMediaV2Key || slices.Contains(e.steamMediaV2Namespaces, namespace)
 }
 
 func (e *Engine) Drain() {

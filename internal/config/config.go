@@ -29,7 +29,8 @@ type Config struct {
 	LocalWorker *Worker     `mapstructure:"local_worker"`
 	Retention   Retention   `mapstructure:"retention"`
 
-	SteamEvidence SteamEvidence `mapstructure:"steam_evidence"`
+	SteamEvidence          SteamEvidence `mapstructure:"steam_evidence"`
+	SteamMediaV2Namespaces []string      `mapstructure:"steam_media_preview_namespaces"`
 }
 
 type HTTP struct {
@@ -79,6 +80,9 @@ func Load(path string) (Config, error) {
 	}
 	if err := cfg.SteamEvidence.validate(); err != nil {
 		return cfg, err
+	}
+	if !identifiers(cfg.SteamMediaV2Namespaces) {
+		return cfg, errors.New("invalid steam_media_preview_namespaces")
 	}
 	return cfg, validatePrincipals(cfg)
 }
