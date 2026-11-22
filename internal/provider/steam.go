@@ -23,7 +23,6 @@ const (
 	steamDetailsPath  = "/api/appdetails"
 	steamNewsPath     = "/ISteamNews/GetNewsForApp/v2/"
 	steamPlayersPath  = "/ISteamUserStats/GetNumberOfCurrentPlayers/v1/"
-	steamDetailsLimit = 512 << 10
 	steamNewsLimit    = 128 << 10
 	steamPlayersLimit = 4 << 10
 	steamNewsExcerpt  = 512
@@ -54,7 +53,7 @@ func SteamManifest(fixture *egress.FixtureNetwork) Manifest {
 		run                func(context.Context, Task, egress.Client) Result
 		normalize          func(Task, SegmentScope, string, jsontext.Value) (jsontext.Value, jsontext.Value, error)
 	}{
-		{"steam.details", steamStore, steamDetailsPath, []string{"details", "price", "media"}, steamDetailsLimit, time.Hour, normalizeSteamDetailsParams, acquireSteamDetails, normalizeSteamDetails},
+		{"steam.details", steamStore, steamDetailsPath, []string{"details", "price", "media"}, MaxSteamEvidenceBytes, time.Hour, normalizeSteamDetailsParams, acquireSteamDetails, normalizeSteamDetails},
 		{"steam.news", steamAPI, steamNewsPath, []string{"news"}, steamNewsLimit, time.Hour, normalizeSteamNewsParams, acquireSteamNews, normalizeSteamNews},
 		{"steam.players", steamAPI, steamPlayersPath, []string{"players"}, steamPlayersLimit, 30 * time.Minute, Normalize[struct{}], acquireSteamPlayers, normalizeSteamPlayers},
 	}

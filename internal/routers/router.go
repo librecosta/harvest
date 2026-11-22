@@ -38,6 +38,7 @@ func requestBodyLimit(h *fasthttp.RequestHeader) fasthttp.RequestConfig {
 	}{
 		{"/internal/v1/workers/", "/heartbeat", execution.MaxHeartbeatBody},
 		{"/internal/v1/attempts/", "/complete", provider.MaxCompletionBody},
+		{"/internal/v1/attempts/", "/evidence", provider.MaxSteamEvidenceBytes},
 		{"/internal/v1/permits/", "/finish", execution.MaxPermitFinishBody},
 	} {
 		id, ok := bytes.CutPrefix(path, []byte(route.prefix))
@@ -46,7 +47,7 @@ func requestBodyLimit(h *fasthttp.RequestHeader) fasthttp.RequestConfig {
 		}
 		id, ok = bytes.CutSuffix(id, []byte(route.suffix))
 		if !ok || len(id) != 36 {
-			break
+			continue
 		}
 		parsed, err := uuid.Parse(string(id))
 		if err == nil && execution.UUIDv7(parsed) {

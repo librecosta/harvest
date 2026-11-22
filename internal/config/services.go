@@ -32,6 +32,8 @@ type Worker struct {
 	EgressProfiles     []string         `mapstructure:"egress_profiles"`
 	Concurrency        int32            `mapstructure:"concurrency"`
 	Egress             egress.Config    `mapstructure:"egress"`
+
+	SteamEvidenceAppIDs []int64 `mapstructure:"steam_evidence_app_ids"`
 }
 
 func LoadWorker(path string) (Worker, error) {
@@ -75,6 +77,16 @@ func validateWorker(w Worker) error {
 	if seen[provider.SteamCatalog] && !validSteamCatalogKey(w.SteamCatalogAPIKey) ||
 		!seen[provider.SteamCatalog] && w.SteamCatalogAPIKey != "" {
 		return errors.New("steam.catalog requires a hexadecimal Web API key in the executing Worker YAML")
+	}
+	if len(w.SteamEvidenceAppIDs) > 8 || len(w.SteamEvidenceAppIDs) != 0 && !seen["steam.details"] {
+		return errors.New("steam_evidence_app_ids requires a steam.details offer and permits at most eight AppIDs")
+	}
+	apps := make(map[int64]bool, len(w.SteamEvidenceAppIDs))
+	for _, id := range w.SteamEvidenceAppIDs {
+		if id <= 0 || id > 1<<32-1 || apps[id] {
+			return errors.New("steam_evidence_app_ids must contain unique positive uint32 AppIDs")
+		}
+		apps[id] = true
 	}
 	return validateEgress(w.Egress)
 }

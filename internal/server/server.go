@@ -248,6 +248,9 @@ func maintain(ctx context.Context, engine *execution.Engine, logger *slog.Logger
 			if err != nil && ctx.Err() == nil {
 				logger.Warn("permit pruning unavailable")
 			}
+			run, cancel = context.WithTimeout(ctx, 2*time.Second)
+			engine.RecoverSteamEvidence(run, logger)
+			cancel()
 		case <-results.C:
 			run, cancel := context.WithTimeout(ctx, time.Second)
 			err := engine.PruneResults(run)

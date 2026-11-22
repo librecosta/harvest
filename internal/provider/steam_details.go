@@ -152,7 +152,12 @@ type steamMedia struct {
 
 func acquireSteamDetails(ctx context.Context, t Task, network egress.Client) Result {
 	var presence map[string]steamStorePresence
-	sdk, err := newSteamClient(network, steamDetailsLimit, &presence)
+	transport := steamTransport{client: network, maxBytes: MaxSteamEvidenceBytes, store: &presence}
+	var evidence SteamEvidence
+	if t.CaptureSteamEvidence {
+		transport.evidence = &evidence
+	}
+	sdk, err := newSteamClientWithOptions(transport)
 	if err != nil {
 		return steamFailed(t, "policy_denied", "details", "price", "media")
 	}
@@ -230,7 +235,11 @@ func acquireSteamDetails(ctx context.Context, t Task, network egress.Client) Res
 	if media.hasLinks() {
 		assets = steamSegment(t, "media", "", media)
 	}
-	return steamResult("", detail, price, assets)
+	result := steamResult("", detail, price, assets)
+	if len(evidence.Body) != 0 && metadata.Name != "" && (result.State == "succeeded" || result.State == "partial") {
+		result.SteamEvidence = &evidence
+	}
+	return result
 }
 
 func positiveSteamNumber(raw string) bool {

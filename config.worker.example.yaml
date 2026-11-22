@@ -3,6 +3,8 @@ node_id: "dev-worker-01" # Stable, unique for this logical worker; keep across r
 control_url: "http://127.0.0.1:8080" # Docker private network: http://harvest:8080
 token: "REPLACE_WITH_A_RANDOM_WORKER_SERVICE_TOKEN"
 concurrency: 2
+# Optional pilot AppIDs, up to eight. Enable after upgrading the Server.
+# steam_evidence_app_ids: [434000]
 
 offers:
   - {capability: "web.http", request_schema: 1, output_schema: 1, implementation: "web_v1"}

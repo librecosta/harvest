@@ -97,6 +97,10 @@ func (c client) request(ctx context.Context, method, path string, in, out any) (
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	return c.send(req, out)
+}
+
+func (c client) send(req *http.Request, out any) (bool, error) {
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return false, errors.New("control plane unavailable")

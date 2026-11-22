@@ -89,10 +89,10 @@ type catalogPresence struct {
 
 func acquireCatalog(ctx context.Context, t Task, network egress.Client) Result {
 	var presence catalogPresence
-	sdk, err := newSteamClientWithOptions(network, catalogBodyLimit, nil, func(raw []byte) bool {
+	sdk, err := newSteamClientWithOptions(steamTransport{client: network, maxBytes: catalogBodyLimit, validate: func(raw []byte) bool {
 		return json.Unmarshal(raw, &presence) == nil && presence.Response != nil &&
 			presence.Response.Apps != nil && presence.Response.More != nil && presence.Response.Last != nil
-	}, steam.WithBaseURL(catalogOrigin))
+	}}, steam.WithBaseURL(catalogOrigin))
 	if err != nil {
 		return steamFailed(t, "policy_denied", "catalog")
 	}

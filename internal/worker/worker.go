@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
+	"slices"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -127,7 +129,7 @@ func Run(ctx context.Context, cfg config.Worker, registry *provider.Registry, lo
 					started := time.Now()
 					ok, err := api.request(ctx, http.MethodPost, base+"/claim", nil, &claim)
 					if err == nil && ok {
-						execute(life, api, registry, pool, claim, started, cfg.SteamCatalogAPIKey)
+						execute(life, api, registry, pool, claim, started, cfg, logger)
 					}
 				}
 				wait(ctx, time.Second+time.Duration(rand.IntN(250))*time.Millisecond)
@@ -166,7 +168,7 @@ func wait(ctx context.Context, duration time.Duration) {
 
 const safetyMargin = 100 * time.Millisecond
 
-func execute(ctx context.Context, api client, registry *provider.Registry, pool *egress.Pool, claim execution.Claim, started time.Time, steamCatalogKey string) {
+func execute(ctx context.Context, api client, registry *provider.Registry, pool *egress.Pool, claim execution.Claim, started time.Time, cfg config.Worker, logger *slog.Logger) {
 	cap, ok := registry.Capability(claim.Task.Offer.Capability)
 	if !ok || cap.Execute == nil || cap.Offer != claim.Task.Offer || claim.LeaseMS < 1 {
 		return
@@ -188,7 +190,7 @@ func execute(ctx context.Context, api client, registry *provider.Registry, pool 
 			target.SteamURI = provider.SteamRequestURI(cap.Capability, claim.Task.ExternalKey, claim.Task.Params)
 		}
 		if cap.Capability == provider.SteamCatalog {
-			target.SteamCatalogKey = steamCatalogKey
+			target.SteamCatalogKey = cfg.SteamCatalogAPIKey
 		}
 		session := pool.Session(workCtx, *claim.Network, *cap.Network, claim.Task.Namespace, cap.Capability, permitGate{api, claim, &policyChanged}, target)
 		defer session.Close()
@@ -202,8 +204,13 @@ func execute(ctx context.Context, api client, registry *provider.Registry, pool 
 			result <- provider.Result{State: "failed", Code: "invalid_payload"}
 			return
 		}
-		claim.Task.Params = params
-		result <- cap.Execute(workCtx, claim.Task, network)
+		task := claim.Task
+		task.Params = params
+		if cap.Capability == "steam.details" && len(cfg.SteamEvidenceAppIDs) != 0 {
+			appID, _ := strconv.ParseUint(task.ExternalKey, 10, 32)
+			task.CaptureSteamEvidence = slices.Contains(cfg.SteamEvidenceAppIDs, int64(appID))
+		}
+		result <- cap.Execute(workCtx, task, network)
 	}()
 	base := "/attempts/" + claim.AttemptID.String()
 	timer := time.NewTimer(time.Until(deadline))
@@ -246,6 +253,10 @@ func execute(ctx context.Context, api client, registry *provider.Registry, pool 
 			completed, workDone = nil, nil
 			if policyChanged.Load() {
 				outcome = provider.Result{State: "failed", Code: "network_policy_changed"}
+			}
+			if evidence := outcome.SteamEvidence; evidence != nil {
+				outcome.SteamEvidence = nil
+				api.uploadSteamEvidence(ctx, deadline, base, claim, *evidence, logger)
 			}
 			pending = &outcome
 		case <-workDone:

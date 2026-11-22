@@ -64,6 +64,8 @@ type Task struct {
 	Offer       Offer          `json:"offer"`
 	Params      jsontext.Value `json:"params"`
 	Scope       Scope          `json:"scope"`
+
+	CaptureSteamEvidence bool `json:"-"`
 }
 
 type Result struct {
@@ -71,6 +73,8 @@ type Result struct {
 	Code     string         `json:"code,omitempty"`
 	Data     jsontext.Value `json:"data,omitempty"`
 	Segments []Segment      `json:"segments,omitempty"`
+
+	SteamEvidence *SteamEvidence `json:"-"`
 }
 
 type Resource struct {
