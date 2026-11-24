@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const schemaVersion = 13
+const schemaVersion = 14
 
 func CheckSchema(ctx context.Context, pool *pgxpool.Pool) error {
 	// Goose owns this table, so it is intentionally absent from sqlc's DDL.

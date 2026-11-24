@@ -19,6 +19,7 @@ import (
 
 const (
 	SteamMediaV2Key   = "steam.details:1:2:steam_v2"
+	SteamDetailsV3Key = "steam.details:1:3:steam_v3"
 	steamSegmentBytes = 32 << 10
 	steamStore        = "https://store.steampowered.com"
 	steamAPI          = "https://api.steampowered.com"
@@ -63,8 +64,12 @@ func SteamManifest(fixture *egress.FixtureNetwork) Manifest {
 	for _, spec := range specs {
 		obs := &ObservationPolicy{
 			Scopes: func(t Task) []SegmentScope {
-				out := make([]SegmentScope, 0, len(spec.sections))
-				for _, section := range spec.sections {
+				sections := spec.sections
+				if t.Offer.Key() == SteamDetailsV3Key {
+					sections = append(slices.Clone(sections), "rich_details")
+				}
+				out := make([]SegmentScope, 0, len(sections))
+				for _, section := range sections {
 					out = append(out, steamScope(t, section))
 				}
 				return out
@@ -89,6 +94,15 @@ func SteamManifest(fixture *egress.FixtureNetwork) Manifest {
 			mediaPolicy.MaxSegmentBytes = steamSegmentBytes
 			capability.Observation = &mediaPolicy
 			capability.OutputSchema, capability.Implementation = 2, "steam_v2"
+			m.Capabilities = append(m.Capabilities, capability)
+			richPolicy := mediaPolicy
+			richPolicy.ScopeBudget = func(s SegmentScope) (int, int) {
+				if s.Dimensions["section"] == "rich_details" {
+					return steamRichDataBytes, steamRichSegmentBytes
+				}
+				return mediaPolicy.MaxDataBytes, mediaPolicy.MaxSegmentBytes
+			}
+			capability.OutputSchema, capability.Implementation, capability.Observation = 3, "steam_v3", &richPolicy
 			m.Capabilities = append(m.Capabilities, capability)
 		}
 	}
@@ -210,7 +224,11 @@ func steamSegment(t Task, section, code string, data any) Segment {
 	} else if code == "empty_page" {
 		state, evidence = "confirmed_empty", code
 	}
-	s := webSegment(steamScope(t, section), state, evidence, data)
+	limit := steamSegmentBytes
+	if t.Offer.OutputSchema == 3 && section == "rich_details" {
+		limit = steamRichDataBytes
+	}
+	s := observationSegment(steamScope(t, section), state, evidence, data, limit)
 	s.Source = "steam"
 	if t.Offer.OutputSchema != 0 {
 		s.OutputSchema = t.Offer.OutputSchema

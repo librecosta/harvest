@@ -99,7 +99,7 @@ func TestSteamVersionedOffersNative(t *testing.T) {
 		return execution.Request{TargetID: id, Capability: "steam.details", RequestSchema: 1, OutputSchema: version,
 			Params: []byte(`{"language":"english","store_country":"US"}`), Scope: provider.Scope{EgressRegion: "cn"}}
 	}
-	one, two, wrong := int32(1), int32(2), int32(3)
+	one, two, wrong := int32(1), int32(2), int32(4)
 	submit := func(key string, request execution.Request) (q.HarvestJob, error) {
 		t.Helper()
 		return s.engine.SubmitJob(ctx, s.writer, key, execution.Submit{Request: &request})

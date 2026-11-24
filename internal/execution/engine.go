@@ -21,22 +21,23 @@ import (
 )
 
 type Engine struct {
-	Registry               *provider.Registry
-	db                     *pgxpool.Pool
-	queries                *q.Queries
-	admission              sync.RWMutex
-	draining               atomic.Bool
-	workerPolicies         []config.Principal
-	network                egress.NetworkConfig // admission guards the effective policy and all dependent operations.
-	policy                 q.HarvestOperationalPolicy
-	quotaBindings          map[string]string
-	policyUncertain        bool
-	retention              config.Retention
-	steamEvidence          config.SteamEvidence
-	steamMediaV2Namespaces []string
-	steamAssetsNamespaces  []string
-	consumerPolicies       map[string]config.Principal
-	rdap                   rdapCache
+	Registry                 *provider.Registry
+	db                       *pgxpool.Pool
+	queries                  *q.Queries
+	admission                sync.RWMutex
+	draining                 atomic.Bool
+	workerPolicies           []config.Principal
+	network                  egress.NetworkConfig // admission guards the effective policy and all dependent operations.
+	policy                   q.HarvestOperationalPolicy
+	quotaBindings            map[string]string
+	policyUncertain          bool
+	retention                config.Retention
+	steamEvidence            config.SteamEvidence
+	steamMediaV2Namespaces   []string
+	steamDetailsV3Namespaces []string
+	steamAssetsNamespaces    []string
+	consumerPolicies         map[string]config.Principal
+	rdap                     rdapCache
 }
 
 func New(db *pgxpool.Pool, registry *provider.Registry, principals []config.Principal, retention config.Retention) *Engine {
@@ -66,13 +67,15 @@ func NewConfigured(db *pgxpool.Pool, registry *provider.Registry, cfg config.Con
 	}
 	return &Engine{Registry: registry, db: db, queries: q.New(db), workerPolicies: workers, retention: retention, steamEvidence: evidence,
 		steamMediaV2Namespaces: slices.Clone(cfg.SteamMediaV2Namespaces), steamAssetsNamespaces: slices.Clone(cfg.SteamAssetsNamespaces),
-		consumerPolicies: consumers}
+		steamDetailsV3Namespaces: slices.Clone(cfg.SteamDetailsV3Namespaces), consumerPolicies: consumers}
 }
 
 func (e *Engine) offerEnabled(key, namespace string) bool {
 	switch key {
 	case provider.SteamMediaV2Key:
 		return slices.Contains(e.steamMediaV2Namespaces, namespace)
+	case provider.SteamDetailsV3Key:
+		return slices.Contains(e.steamDetailsV3Namespaces, namespace)
 	case provider.SteamAssetsKey:
 		return slices.Contains(e.steamAssetsNamespaces, namespace)
 	default:

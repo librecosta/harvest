@@ -25,6 +25,10 @@ type steamMediaSourceV2 struct {
 }
 
 func resolveSteamDetailsV2(raw []byte, appID uint32) (storefront.AppDetailsMatch, steamMediaSourceV2, error) {
+	return resolveSteamDetails(raw, appID, false)
+}
+
+func resolveSteamDetails(raw []byte, appID uint32, rich bool) (storefront.AppDetailsMatch, steamMediaSourceV2, error) {
 	var rows map[string]struct {
 		Success bool `json:"success"`
 		Data    struct {
@@ -34,7 +38,13 @@ func resolveSteamDetailsV2(raw []byte, appID uint32) (storefront.AppDetailsMatch
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &rows); err != nil {
-		return storefront.AppDetailsMatch{}, steamMediaSourceV2{}, errSteamJSON
+		if !rich || !jsontext.Value(raw).IsValid() {
+			return storefront.AppDetailsMatch{}, steamMediaSourceV2{}, errSteamJSON
+		}
+		safe, err := omitMalformedRichFields(raw)
+		if err != nil || json.Unmarshal(safe, &rows) != nil {
+			return storefront.AppDetailsMatch{}, steamMediaSourceV2{}, errSteamJSON
+		}
 	}
 	envelope := make(storefront.AppDetailsEnvelope, len(rows))
 	for key, row := range rows {

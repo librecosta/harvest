@@ -82,7 +82,11 @@ func normalizeSegments(cap provider.Capability, task provider.Task, result *prov
 		declared[key] = false
 		segment.Scope, segment.ObservedAt = scope, pgTime(segment.ObservedAt)
 		s := acceptedSegment{Segment: segment, key: key}
-		if len(s.Data) > policy.MaxDataBytes {
+		dataLimit, segmentLimit := policy.MaxDataBytes, policy.MaxSegmentBytes
+		if policy.ScopeBudget != nil {
+			dataLimit, segmentLimit = policy.ScopeBudget(scope)
+		}
+		if len(s.Data) > dataLimit {
 			return nil, ErrTooLarge
 		}
 		switch s.State {
@@ -109,7 +113,7 @@ func normalizeSegments(cap provider.Capability, task provider.Task, result *prov
 			if err != nil || !s.Data.IsValid() || bytes.Equal(s.Data, []byte("null")) {
 				return nil, ErrInvalid
 			}
-			if len(s.Data) > policy.MaxDataBytes || len(semantic) > policy.MaxDataBytes {
+			if len(s.Data) > dataLimit || len(semantic) > dataLimit {
 				return nil, ErrTooLarge
 			}
 			if !semantic.IsValid() {
@@ -133,7 +137,7 @@ func normalizeSegments(cap provider.Capability, task provider.Task, result *prov
 					return nil, ErrInvalid
 				}
 				s.Data, err = policy.NormalizeDiagnosticData(s.Evidence, s.Data)
-				if err != nil || len(s.Data) > policy.MaxDataBytes || !s.Data.IsValid() {
+				if err != nil || len(s.Data) > dataLimit || !s.Data.IsValid() {
 					return nil, ErrInvalid
 				}
 			}
@@ -146,12 +150,12 @@ func normalizeSegments(cap provider.Capability, task provider.Task, result *prov
 		default:
 			return nil, ErrInvalid
 		}
-		if policy.MaxSegmentBytes != 0 {
+		if segmentLimit != 0 {
 			encoded, err := json.Marshal(s.Segment)
 			if err != nil {
 				return nil, ErrInvalid
 			}
-			if len(encoded) > policy.MaxSegmentBytes {
+			if len(encoded) > segmentLimit {
 				return nil, ErrTooLarge
 			}
 		}

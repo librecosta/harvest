@@ -151,15 +151,22 @@ type steamMedia struct {
 }
 
 func acquireSteamDetails(ctx context.Context, t Task, network egress.Client) Result {
+	sections := []string{"details", "price", "media"}
+	if t.Offer.OutputSchema == 3 {
+		sections = append(sections, "rich_details")
+	}
 	var presence map[string]steamStorePresence
 	transport := steamTransport{client: network, maxBytes: MaxSteamEvidenceBytes, store: &presence}
+	if t.Offer.OutputSchema == 3 {
+		transport.store = nil
+	}
 	var evidence SteamEvidence
 	if t.CaptureSteamEvidence {
 		transport.evidence = &evidence
 	}
 	sdk, err := newSteamClientWithOptions(transport)
 	if err != nil {
-		return steamFailed(t, "policy_denied", "details", "price", "media")
+		return steamFailed(t, "policy_denied", sections...)
 	}
 	defer sdk.Close()
 	p, _ := Object[steamDetailsParams](t.Params)
@@ -167,21 +174,29 @@ func acquireSteamDetails(ctx context.Context, t Task, network egress.Client) Res
 	appID := steamAppID(t)
 	var match storefront.AppDetailsMatch
 	var mediaV2 steamMediaSourceV2
-	if t.Offer.OutputSchema == 2 {
-		var raw []byte
+	var raw []byte
+	if t.Offer.OutputSchema >= 2 {
 		raw, err = sdk.Web.Storefront.GetAppDetailsRaw(ctx, appID, options)
 		if err == nil {
-			match, mediaV2, err = resolveSteamDetailsV2(raw, appID)
+			match, mediaV2, err = resolveSteamDetails(raw, appID, t.Offer.OutputSchema == 3)
 		}
 	} else {
 		match, err = sdk.Web.Storefront.GetResolvedAppDetails(ctx, appID, options)
 	}
 	if err != nil {
-		return steamFailed(t, steamError(err), "details", "price", "media")
+		return steamFailed(t, steamError(err), sections...)
+	}
+	if t.Offer.OutputSchema == 3 {
+		if err := json.Unmarshal(raw, &presence); err != nil {
+			safe, cleanErr := omitMalformedRichFields(raw)
+			if cleanErr != nil || json.Unmarshal(safe, &presence) != nil {
+				return steamFailed(t, "source_invalid", sections...)
+			}
+		}
 	}
 	strict := presence[match.ResponseKey]
 	if !strict.Success || strict.Data.AppID != appID || match.RequestedAppID != appID || match.Result.Data.SteamAppID != appID || !match.Result.Success {
-		return steamFailed(t, "source_invalid", "details", "price", "media")
+		return steamFailed(t, "source_invalid", sections...)
 	}
 	d, known := match.Result.Data, strict.Data
 	source := steamProvenance(t)
@@ -222,12 +237,16 @@ func acquireSteamDetails(ctx context.Context, t Task, network egress.Client) Res
 		price = steamSegment(t, "price", "price_unreleased", nil)
 	}
 	var assets Segment
-	if t.Offer.OutputSchema == 2 {
+	if t.Offer.OutputSchema >= 2 {
 		assets = steamMediaSegmentV2(t, d, mediaV2)
 	} else {
 		assets = steamMediaSegmentV1(t, d, source)
 	}
-	result := steamResult("", detail, price, assets)
+	segments := []Segment{detail, price, assets}
+	if t.Offer.OutputSchema == 3 {
+		segments = append(segments, steamRichSegment(t, raw, match.ResponseKey))
+	}
+	result := steamResult("", segments...)
 	if len(evidence.Body) != 0 && metadata.Name != "" && (result.State == "succeeded" || result.State == "partial") {
 		result.SteamEvidence = &evidence
 	}
@@ -327,6 +346,8 @@ func normalizeSteamDetails(t Task, scope SegmentScope, state string, data jsonte
 			}
 		}
 		return webData(valid, v, nil)
+	case "rich_details":
+		return normalizeSteamRichDetails(t, state, data)
 	case "price":
 		v, err := ObservationObject[steamPrice](data)
 		valid := err == nil && state == "present" && v.steamSource == source
@@ -338,7 +359,7 @@ func normalizeSteamDetails(t Task, scope SegmentScope, state string, data jsonte
 		}
 		return webData(valid, v, nil)
 	default:
-		if t.Offer.OutputSchema == 2 {
+		if t.Offer.OutputSchema >= 2 {
 			return normalizeSteamMediaV2(source.AppID, state, data)
 		}
 		v, err := ObservationObject[steamMedia](data)

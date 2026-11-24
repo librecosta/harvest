@@ -53,6 +53,7 @@ type steamEvidencePlane struct {
 	workerID      uuid.UUID
 	body          atomic.Pointer[[]byte]
 	requests      atomic.Int32
+	fixtureApp    atomic.Pointer[string]
 	browseStatus  atomic.Int32
 	log           *slog.Logger
 	lost          atomic.Bool
@@ -64,6 +65,10 @@ func newSteamEvidencePlane(t *testing.T, previewNamespaces ...string) *steamEvid
 }
 
 func newSteamTestPlane(t *testing.T, previewNamespaces, assetsNamespaces []string) *steamEvidencePlane {
+	return newSteamTestPlaneForApp(t, previewNamespaces, assetsNamespaces, nil)
+}
+
+func newSteamTestPlaneForApp(t *testing.T, previewNamespaces, assetsNamespaces, richNamespaces []string) *steamEvidencePlane {
 	t.Helper()
 	path := os.Getenv("HARVEST_NATIVE_EVIDENCE_DB_CONFIG")
 	if path == "" {
@@ -108,7 +113,7 @@ func newSteamTestPlane(t *testing.T, previewNamespaces, assetsNamespaces []strin
 	legacyReader := config.Principal{Name: "legacy_reader", Role: "reader", Token: strings.Repeat("h", 40), Namespaces: namespaces[:1]}
 	people := []config.Principal{s.writer, s.agent, foreign, s.operator, limited, wrongCapability, reader, legacyReader}
 	s.principals = people
-	s.engine = execution.NewConfigured(db, s.registry, config.Config{Principals: people, SteamMediaV2Namespaces: previewNamespaces, SteamAssetsNamespaces: assetsNamespaces})
+	s.engine = execution.NewConfigured(db, s.registry, config.Config{Principals: people, SteamMediaV2Namespaces: previewNamespaces, SteamAssetsNamespaces: assetsNamespaces, SteamDetailsV3Namespaces: richNamespaces})
 	netPolicy := egress.NetworkConfig{GlobalBucket: "global",
 		Routes: []egress.RouteConfig{{Profile: profile, Mode: egress.PreferProxy, AllowDirect: true,
 			Paths: []egress.PathConfig{
@@ -220,6 +225,10 @@ func (s *steamEvidencePlane) steamFixture() *egress.FixtureNetwork {
 	roots := x509.NewCertPool()
 	roots.AddCert(leaf)
 	upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		app := "440"
+		if fixture := s.fixtureApp.Load(); fixture != nil {
+			app = *fixture
+		}
 		s.requests.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		if r.Host == "api.steampowered.com" {
@@ -231,7 +240,7 @@ func (s *steamEvidencePlane) steamFixture() *egress.FixtureNetwork {
 			if status := s.browseStatus.Load(); status != 0 {
 				w.WriteHeader(int(status))
 			}
-		} else if r.Method != "GET" || r.Host != "store.steampowered.com" || r.URL.Path != "/api/appdetails" || r.URL.Query().Get("appids") != "440" {
+		} else if r.Method != "GET" || r.Host != "store.steampowered.com" || r.URL.Path != "/api/appdetails" || r.URL.Query().Get("appids") != app {
 			t.Error("unexpected Storefront request")
 		}
 		_, _ = w.Write(*s.body.Load())

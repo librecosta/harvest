@@ -732,7 +732,8 @@ WHERE EXISTS (
     SELECT 1 FROM harvest.schedules s JOIN harvest.targets t ON t.id = s.target_id AND t.namespace = s.namespace
     WHERE s.enabled AND s.capability = 'steam.details' AND s.request_schema = 1
       AND (s.execution_key = $2::text OR
-          (s.execution_key = $3::text AND s.namespace = ANY($4::text[])))
+          (s.execution_key = $3::text AND s.namespace = ANY($4::text[])) OR
+          (s.execution_key = $5::text AND s.namespace = ANY($6::text[])))
       AND s.target_id = (c.value->>'target_id')::uuid AND s.namespace = c.value->>'namespace'
       AND t.state = 'active' AND t.provider = 'steam' AND t.resource_type = 'app'
       AND s.scope->>'locale' = c.value->>'locale' AND upper(s.scope->>'region') = c.value->>'store_country'
@@ -745,10 +746,12 @@ WHERE EXISTS (
 `
 
 type TrackedSteamEvidenceIDsParams struct {
-	Candidates      []byte   `json:"candidates"`
-	ExecutionKey    string   `json:"execution_key"`
-	PilotOffer      string   `json:"pilot_offer"`
-	PilotNamespaces []string `json:"pilot_namespaces"`
+	Candidates          []byte   `json:"candidates"`
+	ExecutionKey        string   `json:"execution_key"`
+	PilotOffer          string   `json:"pilot_offer"`
+	PilotNamespaces     []string `json:"pilot_namespaces"`
+	DetailsV3Offer      string   `json:"details_v3_offer"`
+	DetailsV3Namespaces []string `json:"details_v3_namespaces"`
 }
 
 func (q *Queries) TrackedSteamEvidenceIDs(ctx context.Context, arg TrackedSteamEvidenceIDsParams) ([]uuid.UUID, error) {
@@ -757,6 +760,8 @@ func (q *Queries) TrackedSteamEvidenceIDs(ctx context.Context, arg TrackedSteamE
 		arg.ExecutionKey,
 		arg.PilotOffer,
 		arg.PilotNamespaces,
+		arg.DetailsV3Offer,
+		arg.DetailsV3Namespaces,
 	)
 	if err != nil {
 		return nil, err

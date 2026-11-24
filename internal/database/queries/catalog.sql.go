@@ -218,15 +218,18 @@ WHERE s.enabled AND s.next_due_at <= statement_timestamp() AND t.state = 'active
   AND s.execution_key = ANY($1::text[])
   AND (s.execution_key <> $2::text OR s.namespace = ANY($3::text[]))
   AND (s.execution_key <> $4::text OR s.namespace = ANY($5::text[]))
+  AND (s.execution_key <> $6::text OR s.namespace = ANY($7::text[]))
 ORDER BY s.next_due_at, s.id LIMIT 1 FOR UPDATE OF s SKIP LOCKED
 `
 
 type LockDueScheduleParams struct {
-	Offers           []string `json:"offers"`
-	PilotOffer       string   `json:"pilot_offer"`
-	PilotNamespaces  []string `json:"pilot_namespaces"`
-	AssetsOffer      string   `json:"assets_offer"`
-	AssetsNamespaces []string `json:"assets_namespaces"`
+	Offers              []string `json:"offers"`
+	PilotOffer          string   `json:"pilot_offer"`
+	PilotNamespaces     []string `json:"pilot_namespaces"`
+	DetailsV3Offer      string   `json:"details_v3_offer"`
+	DetailsV3Namespaces []string `json:"details_v3_namespaces"`
+	AssetsOffer         string   `json:"assets_offer"`
+	AssetsNamespaces    []string `json:"assets_namespaces"`
 }
 
 func (q *Queries) LockDueSchedule(ctx context.Context, arg LockDueScheduleParams) (HarvestSchedule, error) {
@@ -234,6 +237,8 @@ func (q *Queries) LockDueSchedule(ctx context.Context, arg LockDueScheduleParams
 		arg.Offers,
 		arg.PilotOffer,
 		arg.PilotNamespaces,
+		arg.DetailsV3Offer,
+		arg.DetailsV3Namespaces,
 		arg.AssetsOffer,
 		arg.AssetsNamespaces,
 	)

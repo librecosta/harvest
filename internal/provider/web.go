@@ -89,10 +89,14 @@ func httpScopes(t Task) []SegmentScope {
 }
 
 func webSegment(scope SegmentScope, state, evidence string, data any) Segment {
+	return observationSegment(scope, state, evidence, data, 32<<10)
+}
+
+func observationSegment(scope SegmentScope, state, evidence string, data any, limit int) Segment {
 	seg := Segment{Scope: scope, OutputSchema: 1, Source: "web", State: state, Evidence: evidence, ObservedAt: time.Now().UTC()}
 	if data != nil {
 		value, err := json.Marshal(data, json.Deterministic(true))
-		if err != nil || len(value) > 32<<10 {
+		if err != nil || len(value) > limit {
 			seg.State, seg.Evidence = "invalid", "html_invalid"
 		} else {
 			seg.Data = value

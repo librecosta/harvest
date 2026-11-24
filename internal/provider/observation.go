@@ -45,6 +45,7 @@ type ObservationPolicy struct {
 	WithdrawEvidence        string
 	MaxDataBytes            int
 	MaxSegmentBytes         int
+	ScopeBudget             func(SegmentScope) (dataBytes, segmentBytes int)
 	Sample                  bool
 }
 

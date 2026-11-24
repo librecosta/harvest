@@ -217,6 +217,7 @@ func (e *Engine) trackedSteamEvidence(ctx context.Context, db *q.Queries, rows [
 	ids, err := db.TrackedSteamEvidenceIDs(ctx, q.TrackedSteamEvidenceIDsParams{
 		ExecutionKey: capability.Key(), Candidates: data,
 		PilotOffer: provider.SteamMediaV2Key, PilotNamespaces: e.steamMediaV2Namespaces,
+		DetailsV3Offer: provider.SteamDetailsV3Key, DetailsV3Namespaces: e.steamDetailsV3Namespaces,
 	})
 	if err != nil {
 		return nil, err
