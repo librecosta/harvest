@@ -17,7 +17,7 @@ func (e *Engine) admitSteamEvidence(ctx context.Context, db *q.Queries, state q.
 	scope q.ConfirmSteamEvidenceParams, staged q.SteamEvidenceStagedAtRow, jobID uuid.UUID) (uuid.UUID, string, error) {
 	for reclaimed := false; ; reclaimed = true {
 		old, err := db.SteamEvidenceScopeVersions(ctx, q.SteamEvidenceScopeVersionsParams{
-			Namespace: scope.Namespace, TargetID: scope.TargetID, Locale: scope.Locale,
+			Namespace: scope.Namespace, TargetID: scope.TargetID, Capability: scope.Capability, Locale: scope.Locale,
 			StoreCountry: scope.StoreCountry, EgressRegion: scope.EgressRegion,
 		})
 		if err != nil {
@@ -38,7 +38,7 @@ func (e *Engine) admitSteamEvidence(ctx context.Context, db *q.Queries, state q.
 				}
 			}
 			id, err := db.ArchiveSteamEvidence(ctx, q.ArchiveSteamEvidenceParams{
-				ID: uuid.NewV7(), Namespace: scope.Namespace, TargetID: scope.TargetID, Locale: scope.Locale,
+				ID: uuid.NewV7(), Namespace: scope.Namespace, TargetID: scope.TargetID, Capability: scope.Capability, Locale: scope.Locale,
 				StoreCountry: scope.StoreCountry, EgressRegion: scope.EgressRegion, JobID: jobID,
 				AttemptID: scope.AttemptID, ConfirmedAt: scope.ConfirmedAt,
 			})
@@ -183,13 +183,17 @@ func (e *Engine) trackedSteamEvidence(ctx context.Context, db *q.Queries, rows [
 		if !row.Latest {
 			continue
 		}
-		rule := e.source("steam.details", row.Namespace)
+		compiled, ok := e.Registry.Capability(row.Capability)
+		if !ok || compiled.Network == nil {
+			continue
+		}
+		rule := e.source(row.Capability, row.Namespace)
 		route := e.route(rule.Profile)
 		candidate := steamTrackingCandidate{SteamEvidenceExpiryCandidatesRow: row}
 		for _, mode := range []string{"", directFirst, egress.PreferProxy, egress.RequireProxy} {
-			if allowedMode(route, capability.Network.AllowDirect, mode) &&
+			if allowedMode(route, compiled.Network.AllowDirect, mode) &&
 				slices.ContainsFunc(route.Paths, func(path egress.PathConfig) bool {
-					return path.Region == row.EgressRegion && allowedTaskPath(rule, path, mode, capability.Network.AllowDirect)
+					return path.Region == row.EgressRegion && allowedTaskPath(rule, path, mode, compiled.Network.AllowDirect)
 				}) {
 				candidate.AllowedModes = append(candidate.AllowedModes, mode)
 			}
@@ -218,6 +222,7 @@ func (e *Engine) trackedSteamEvidence(ctx context.Context, db *q.Queries, rows [
 		ExecutionKey: capability.Key(), Candidates: data,
 		PilotOffer: provider.SteamMediaV2Key, PilotNamespaces: e.steamMediaV2Namespaces,
 		DetailsV3Offer: provider.SteamDetailsV3Key, DetailsV3Namespaces: e.steamDetailsV3Namespaces,
+		EventsOffer: provider.SteamEventsKey, EventsNamespaces: e.steamEventsNamespaces,
 	})
 	if err != nil {
 		return nil, err

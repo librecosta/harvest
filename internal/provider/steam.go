@@ -60,7 +60,7 @@ func SteamManifest(fixture *egress.FixtureNetwork) Manifest {
 		{"steam.news", steamAPI, steamNewsPath, []string{"news"}, steamNewsLimit, time.Hour, normalizeSteamNewsParams, acquireSteamNews, normalizeSteamNews},
 		{"steam.players", steamAPI, steamPlayersPath, []string{"players"}, steamPlayersLimit, 30 * time.Minute, Normalize[struct{}], acquireSteamPlayers, normalizeSteamPlayers},
 	}
-	m := Manifest{Name: "steam", Resources: []Resource{{"app", steamApp}, {"catalog", catalogKey}}, Capabilities: []Capability{catalogCapability(fixture), steamAssetsCapability(fixture)}}
+	m := Manifest{Name: "steam", Resources: []Resource{{"app", steamApp}, {"catalog", catalogKey}}, Capabilities: []Capability{catalogCapability(fixture), steamAssetsCapability(fixture), steamEventsCapability(fixture)}}
 	for _, spec := range specs {
 		obs := &ObservationPolicy{
 			Scopes: func(t Task) []SegmentScope {
@@ -144,7 +144,17 @@ func normalizeSteamNewsParams(data jsontext.Value) (jsontext.Value, error) {
 
 func NormalizeSteamScope(capability string, data jsontext.Value, scope Scope) (Scope, error) {
 	scope.EgressRegion = strings.ToLower(scope.EgressRegion)
-	if capability == "steam.details" || capability == SteamAssets {
+	if capability == SteamEvents {
+		p, err := Object[steamEventsParams](data)
+		if err != nil || steamLanguage(p.Language) != p.Language || p.Language == "" ||
+			scope.Region != "" || scope.Locale != "" && steamLanguage(scope.Locale) != p.Language {
+			return Scope{}, errors.New("Store Events scope conflicts with the requested language")
+		}
+		scope.Locale = "en"
+		if p.Language == "schinese" {
+			scope.Locale = "zh-cn"
+		}
+	} else if capability == "steam.details" || capability == SteamAssets {
 		v, err := Object[steamDetailsParams](data)
 		if err != nil || scope.Locale != "" && steamLanguage(scope.Locale) != v.Language ||
 			scope.Region != "" && !strings.EqualFold(scope.Region, v.Country) {
@@ -173,6 +183,8 @@ func SteamRequestURI(capability, app string, params jsontext.Value) string {
 	switch capability {
 	case SteamAssets:
 		return steamAssetsURI(app, params)
+	case SteamEvents:
+		return steamEventsURI(app, params)
 	case "steam.details":
 		p, err := Object[steamDetailsParams](params)
 		if err != nil || steamLanguage(p.Language) != p.Language || p.Language == "" || !slices.Contains([]string{"CN", "US", "HK"}, p.Country) {

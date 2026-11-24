@@ -102,7 +102,7 @@ func (e *Engine) CreateSchedule(ctx context.Context, p config.Principal, in Sche
 		return q.HarvestSchedule{}, ErrDraining
 	}
 	return tx(ctx, e, func(db *q.Queries) (q.HarvestSchedule, error) {
-		if in.Request.Capability == "steam.details" {
+		if in.Request.Capability == "steam.details" || in.Request.Capability == provider.SteamEvents {
 			if err := db.LockSteamEvidenceTrackingShared(ctx); err != nil {
 				return q.HarvestSchedule{}, err
 			}
@@ -177,7 +177,8 @@ func (e *Engine) EditSchedule(ctx context.Context, p config.Principal, id uuid.U
 		if s.Revision != patch.Revision {
 			return s, ErrConflict
 		}
-		if s.Capability == "steam.details" || patch.Request != nil && patch.Request.Capability == "steam.details" {
+		if s.Capability == "steam.details" || s.Capability == provider.SteamEvents ||
+			patch.Request != nil && (patch.Request.Capability == "steam.details" || patch.Request.Capability == provider.SteamEvents) {
 			if err := db.LockSteamEvidenceTrackingShared(ctx); err != nil {
 				return s, err
 			}
@@ -262,6 +263,7 @@ func (e *Engine) reconcileOne(ctx context.Context, offers []string) (bool, error
 			Offers: offers, PilotOffer: provider.SteamMediaV2Key, PilotNamespaces: e.steamMediaV2Namespaces,
 			AssetsOffer: provider.SteamAssetsKey, AssetsNamespaces: e.steamAssetsNamespaces,
 			DetailsV3Offer: provider.SteamDetailsV3Key, DetailsV3Namespaces: e.steamDetailsV3Namespaces,
+			EventsOffer: provider.SteamEventsKey, EventsNamespaces: e.steamEventsNamespaces,
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, nil

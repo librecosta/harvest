@@ -23,6 +23,13 @@ func ValidSteamEvidence(task Task, body []byte) bool {
 	if len(body) == 0 || len(body) > MaxSteamEvidenceBytes || !jsontext.Value(body).IsValid() {
 		return false
 	}
+	if task.Offer.Key() == SteamEventsKey {
+		page, verified, _ := readSteamEventPage(body, steamAppID(task), task.Scope.Locale)
+		return verified && len(page.Events) > 0
+	}
+	if task.Offer.Capability != "steam.details" {
+		return false
+	}
 	if task.Offer.OutputSchema >= 2 {
 		match, _, err := resolveSteamDetails(body, steamAppID(task), task.Offer.OutputSchema == 3)
 		return err == nil && steamText(match.Result.Data.Name, 256) != ""

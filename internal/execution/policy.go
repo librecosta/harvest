@@ -17,6 +17,7 @@ import (
 	"github.com/librecosta/harvest/internal/config"
 	q "github.com/librecosta/harvest/internal/database/queries"
 	"github.com/librecosta/harvest/internal/egress"
+	"github.com/librecosta/harvest/internal/provider"
 )
 
 const MaxPolicyBody = 64 << 10
@@ -111,7 +112,13 @@ func (e *Engine) validatePolicy(c egress.NetworkConfig) error {
 		}
 		r := c.Routes[slices.IndexFunc(c.Routes, func(r egress.RouteConfig) bool { return r.Profile == rule.Profile })]
 		if cap.Network.Steam {
-			if rule.Capability == "steam.details" {
+			if rule.Capability == provider.SteamEvents && !slices.ContainsFunc(c.Sources, func(other egress.SourceConfig) bool {
+				return other.Capability == "steam.details" && other.Profile == rule.Profile &&
+					other.ProviderBucket == rule.ProviderBucket && other.AccountBucket == rule.AccountBucket
+			}) {
+				return errors.New("Steam Events must use the AppDetails route and shared Storefront quotas")
+			}
+			if rule.Capability == "steam.details" || rule.Capability == provider.SteamEvents {
 				if storeProvider != "" && storeProvider != rule.ProviderBucket {
 					return errors.New("Steam Storefront sources must share a provider quota")
 				}
@@ -197,7 +204,7 @@ func extendQuotaBindings(c egress.NetworkConfig, prior map[string]string) (map[s
 		}
 		// Keep Steam's shared budgets when all its sources move to new namespaces.
 		switch s.Capability {
-		case "steam.details":
+		case "steam.details", provider.SteamEvents:
 			if !quota("steam/storefront/provider", s.ProviderBucket, "provider") {
 				return nil, ErrPolicyBinding
 			}

@@ -31,6 +31,7 @@ type Config struct {
 
 	SteamEvidence            SteamEvidence `mapstructure:"steam_evidence"`
 	SteamMediaV2Namespaces   []string      `mapstructure:"steam_media_preview_namespaces"`
+	SteamEventsNamespaces    []string      `mapstructure:"steam_events_preview_namespaces"`
 	SteamDetailsV3Namespaces []string      `mapstructure:"steam_rich_details_preview_namespaces"`
 	SteamAssetsNamespaces    []string      `mapstructure:"steam_assets_preview_namespaces"`
 }
@@ -88,6 +89,9 @@ func Load(path string) (Config, error) {
 	}
 	if !identifiers(cfg.SteamDetailsV3Namespaces) {
 		return cfg, errors.New("invalid steam_rich_details_preview_namespaces")
+	}
+	if !identifiers(cfg.SteamEventsNamespaces) {
+		return cfg, errors.New("invalid steam_events_preview_namespaces")
 	}
 	if !identifiers(cfg.SteamAssetsNamespaces) {
 		return cfg, errors.New("invalid steam_assets_preview_namespaces")

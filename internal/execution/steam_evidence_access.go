@@ -14,10 +14,20 @@ func allowSteamEvidenceRead(p config.Principal, namespace string) error {
 	if p.Role != "operator" {
 		return ErrForbidden
 	}
-	if !canCapability(p, "steam.details") || (namespace != "" && !canNamespace(p, namespace)) {
+	if len(steamEvidenceCapabilities(p)) == 0 || (namespace != "" && !canNamespace(p, namespace)) {
 		return ErrNotFound
 	}
 	return nil
+}
+
+func steamEvidenceCapabilities(p config.Principal) []string {
+	var allowed []string
+	for _, cap := range []string{"steam.details", provider.SteamEvents} {
+		if canCapability(p, cap) {
+			allowed = append(allowed, cap)
+		}
+	}
+	return allowed
 }
 
 func (e *Engine) ListSteamEvidence(ctx context.Context, p config.Principal, filter q.ListSteamEvidenceParams) ([]q.ListSteamEvidenceRow, error) {
@@ -39,6 +49,7 @@ func (e *Engine) ListSteamEvidence(ctx context.Context, p config.Principal, filt
 	if err := allowSteamEvidenceRead(p, filter.Namespace); err != nil {
 		return nil, err
 	}
+	filter.Capabilities = steamEvidenceCapabilities(p)
 	return e.queries.ListSteamEvidence(ctx, filter)
 }
 
@@ -46,7 +57,7 @@ func (e *Engine) SteamEvidenceRaw(ctx context.Context, p config.Principal, id uu
 	if err := allowSteamEvidenceRead(p, ""); err != nil {
 		return nil, err
 	}
-	return found(e.queries.SteamEvidenceRaw(ctx, q.SteamEvidenceRawParams{ID: id, Namespaces: p.Namespaces}))
+	return found(e.queries.SteamEvidenceRaw(ctx, q.SteamEvidenceRawParams{ID: id, Namespaces: p.Namespaces, Capabilities: steamEvidenceCapabilities(p)}))
 }
 
 type SteamEvidenceStorageView struct {
@@ -74,6 +85,15 @@ func (e *Engine) SteamEvidenceStorage(ctx context.Context, p config.Principal, n
 				return SteamEvidenceStorageView{}, ErrNotFound
 			}
 			budget = e.steamEvidence.GlobalBytes
+		}
+		if caps := steamEvidenceCapabilities(p); len(caps) != 2 {
+			visible, err := db.SteamEvidenceCapabilitiesVisible(ctx, q.SteamEvidenceCapabilitiesVisibleParams{Namespace: namespace, Capabilities: caps})
+			if err != nil {
+				return SteamEvidenceStorageView{}, err
+			}
+			if !visible {
+				return SteamEvidenceStorageView{}, ErrNotFound
+			}
 		}
 		stats, err := db.SteamEvidenceStorage(ctx, namespace)
 		return SteamEvidenceStorageView{Namespace: namespace, SteamEvidenceStorageRow: stats,

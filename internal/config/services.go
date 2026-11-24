@@ -81,8 +81,8 @@ func validateWorker(w Worker) error {
 		!offered[provider.SteamCatalog] && w.SteamCatalogAPIKey != "" {
 		return errors.New("steam.catalog requires a hexadecimal Web API key in the executing Worker YAML")
 	}
-	if len(w.SteamEvidenceAppIDs) > 8 || len(w.SteamEvidenceAppIDs) != 0 && !offered["steam.details"] {
-		return errors.New("steam_evidence_app_ids requires a steam.details offer and permits at most eight AppIDs")
+	if len(w.SteamEvidenceAppIDs) > 8 || len(w.SteamEvidenceAppIDs) != 0 && !offered["steam.details"] && !offered["steam.events"] {
+		return errors.New("steam_evidence_app_ids requires a steam.details or steam.events offer and permits at most eight AppIDs")
 	}
 	apps := make(map[int64]bool, len(w.SteamEvidenceAppIDs))
 	for _, id := range w.SteamEvidenceAppIDs {

@@ -22,6 +22,7 @@ steam_evidence:
 steam_media_preview_namespaces: []
 # Allow explicit steam.details Output Schema 3 only in dedicated pilot namespaces.
 steam_rich_details_preview_namespaces: []
+steam_events_preview_namespaces: []
 # Allow StoreBrowse jobs only in dedicated pilot namespaces.
 steam_assets_preview_namespaces: []
 

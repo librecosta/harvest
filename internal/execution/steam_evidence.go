@@ -29,7 +29,7 @@ const (
 var ErrSteamEvidenceSource = errors.New("invalid_evidence_source")
 
 func (e *Engine) steamEvidenceTask(ctx context.Context, db *q.Queries, job q.HarvestJob, a q.HarvestAttempt) (provider.Task, error) {
-	if job.Capability != "steam.details" || job.RequestSchema != 1 || a.EgressRegion == nil || *a.EgressRegion == "" {
+	if (job.Capability != "steam.details" && job.ExecutionKey != provider.SteamEventsKey) || job.RequestSchema != 1 || a.EgressRegion == nil || *a.EgressRegion == "" {
 		return provider.Task{}, ErrUnsupported
 	}
 	work, err := e.resolveStored(ctx, db, []string{job.Namespace}, job.TargetID, job.Capability, job.ExecutionKey, job.Params, job.Scope, job.Fingerprint)
@@ -181,7 +181,7 @@ func (e *Engine) archiveSteamEvidence(ctx context.Context, row q.SteamEvidenceCa
 			return "", err
 		}
 		scope := q.ConfirmSteamEvidenceParams{
-			AttemptID: a.ID, Namespace: task.Namespace, TargetID: task.TargetID, Locale: task.Scope.Locale,
+			AttemptID: a.ID, Namespace: task.Namespace, TargetID: task.TargetID, Capability: task.Offer.Capability, Locale: task.Scope.Locale,
 			StoreCountry: strings.ToUpper(task.Scope.Region), EgressRegion: strings.ToLower(*a.EgressRegion),
 			ConfirmedAt: *a.EndedAt,
 		}

@@ -206,7 +206,7 @@ func execute(ctx context.Context, api client, registry *provider.Registry, pool 
 		}
 		task := claim.Task
 		task.Params = params
-		if cap.Capability == "steam.details" && len(cfg.SteamEvidenceAppIDs) != 0 {
+		if (cap.Capability == "steam.details" || cap.Capability == provider.SteamEvents) && len(cfg.SteamEvidenceAppIDs) != 0 {
 			appID, _ := strconv.ParseUint(task.ExternalKey, 10, 32)
 			task.CaptureSteamEvidence = slices.Contains(cfg.SteamEvidenceAppIDs, int64(appID))
 		}

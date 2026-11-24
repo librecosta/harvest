@@ -34,6 +34,7 @@ type Engine struct {
 	retention                config.Retention
 	steamEvidence            config.SteamEvidence
 	steamMediaV2Namespaces   []string
+	steamEventsNamespaces    []string
 	steamDetailsV3Namespaces []string
 	steamAssetsNamespaces    []string
 	consumerPolicies         map[string]config.Principal
@@ -67,7 +68,7 @@ func NewConfigured(db *pgxpool.Pool, registry *provider.Registry, cfg config.Con
 	}
 	return &Engine{Registry: registry, db: db, queries: q.New(db), workerPolicies: workers, retention: retention, steamEvidence: evidence,
 		steamMediaV2Namespaces: slices.Clone(cfg.SteamMediaV2Namespaces), steamAssetsNamespaces: slices.Clone(cfg.SteamAssetsNamespaces),
-		steamDetailsV3Namespaces: slices.Clone(cfg.SteamDetailsV3Namespaces), consumerPolicies: consumers}
+		steamDetailsV3Namespaces: slices.Clone(cfg.SteamDetailsV3Namespaces), steamEventsNamespaces: slices.Clone(cfg.SteamEventsNamespaces), consumerPolicies: consumers}
 }
 
 func (e *Engine) offerEnabled(key, namespace string) bool {
@@ -76,6 +77,8 @@ func (e *Engine) offerEnabled(key, namespace string) bool {
 		return slices.Contains(e.steamMediaV2Namespaces, namespace)
 	case provider.SteamDetailsV3Key:
 		return slices.Contains(e.steamDetailsV3Namespaces, namespace)
+	case provider.SteamEventsKey:
+		return slices.Contains(e.steamEventsNamespaces, namespace)
 	case provider.SteamAssetsKey:
 		return slices.Contains(e.steamAssetsNamespaces, namespace)
 	default:

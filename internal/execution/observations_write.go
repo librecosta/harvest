@@ -268,7 +268,7 @@ func (e *Engine) writeObservations(ctx context.Context, db *q.Queries, job q.Har
 			return now, err
 		}
 	}
-	if job.Capability == provider.SteamCatalog || job.Capability == "steam.details" {
+	if job.Capability == provider.SteamCatalog || job.Capability == "steam.details" || job.Capability == provider.SteamEvents {
 		ids := make([]uuid.UUID, 0, len(segments))
 		for _, s := range segments {
 			if s.observationID != uuid.Nil() {
